@@ -5,9 +5,9 @@ import toml
 from pathlib import Path
 
 # --- Internal Imports ---
-from supaernova.utils import logging as log
-from supaernova.data import Data
-from supaernova.utils.typing import CFG, INPUT
+from suPAErnova.utils import logging as log
+from suPAErnova.data import Data
+from suPAErnova.utils.typing import CFG, INPUT
 
 # --- Constants ---
 STEPS = {"DATA": Data}

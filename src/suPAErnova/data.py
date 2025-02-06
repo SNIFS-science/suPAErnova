@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from supaernova.steps import Requirement, Step
-from supaernova.utils.typing import CFG
+from suPAErnova.steps import Requirement, Step
+from suPAErnova.utils.typing import CFG
 
 
 # === Requirements ===

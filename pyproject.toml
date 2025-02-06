@@ -1,5 +1,5 @@
 [project]
-name = "supaernova"
+name = "suPAErnova"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-supaernova = "supaernova:main"
+supaernova = "suPAErnova:main"
 
 [build-system]
 requires = ["hatchling"]

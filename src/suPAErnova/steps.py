@@ -3,7 +3,7 @@ from logging import Logger
 from pathlib import Path
 import typing
 from typing import Any, Callable, Generic, Literal, TypeVar, cast, final
-from supaernova.utils.typing import CFG
+from suPAErnova.utils.typing import CFG
 import toml
 
 # --- Types ---
