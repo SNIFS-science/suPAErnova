@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-supaernova = "suPAErnova:main"
+suPAErnova = "suPAErnova:main"
 
 [build-system]
 requires = ["hatchling"]
