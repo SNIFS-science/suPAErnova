@@ -8,9 +8,12 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "astropy>=7.0.1",
     "click>=8.1.8",
     "coloredlogs>=15.0.1",
+    "matplotlib>=3.10.0",
     "pandas>=2.2.3",
+    "sncosmo>=2.12.0",
     "tensorflow>=2.18.0",
     "toml>=0.10.2",
     "tqdm>=4.67.1",
@@ -25,14 +28,14 @@ build-backend = "hatchling.build"
 
 # === Tools ===
 
-# --- LSP: BasedPyRight ---
 [tool.basedpyright]
+extends = "../../pyproject.toml"
 
-# --- CMP: Ruff ---
 [tool.ruff]
+extend = "../../pyproject.toml"
 
-# --- Lint: Ruff ---
 [tool.ruff.lint]
+logger-objects = [
+    "suPAErnova.utils.logging",
+]
 
-# --- Format: Ruff ---
-[tool.ruff.format]

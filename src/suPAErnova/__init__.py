@@ -1,62 +1,76 @@
-# --- External Imports ---
-from typing import cast
-import click
-import toml
+from typing import TYPE_CHECKING
 from pathlib import Path
+import traceback
 
-# --- Internal Imports ---
+import toml
+import click
+
+from suPAErnova.steps import Data, AutoEncoder
 from suPAErnova.utils import logging as log
-from suPAErnova.data import Data
-from suPAErnova.utils.typing import CFG, INPUT
+
+if TYPE_CHECKING:
+    from suPAErnova.steps import Step
+    from suPAErnova.utils.typing import CFG, INPUT
 
 # --- Constants ---
-STEPS = {"DATA": Data}
+STEPS: dict[str, type["Step"]] = {"DATA": Data, "AUTOENCODER": AutoEncoder}
 
 
-def missing_step(step: str):
+# --- Utilities ---
+def missing_step(step: str) -> None:
     log.error(f"Unknown Step: {step}")
+
+
+def normalise_config(cfg: "INPUT") -> "CFG":
+    rtn: CFG = {}
+    for k, v in cfg.items():
+        val = v
+        if isinstance(v, dict):
+            val = normalise_config(v)
+        rtn[k.upper()] = val
+    return rtn
 
 
 @click.command()
 @click.option("-v", "--verbose", is_flag=True, type=bool, default=False)
+@click.option("-f", "--force", is_flag=True, type=bool, default=False)
 @click.argument("config", type=click.Path(exists=True, path_type=Path))
-def cli(verbose: bool, config: Path):
-    input_cfg: INPUT = toml.load(config)
-    cfg: CFG = input_cfg
+def cli(verbose: bool, force: bool, config: Path) -> bool:
+    cfg: CFG = normalise_config(toml.load(config))
 
     # Setup global config
-    cfg["global"] = cast(CFG, input_cfg.get("global", {}))
+    cfg["GLOBAL"] = cfg.get("GLOBAL", {})
 
     # Set verbosity
-    cfg["global"]["verbose"] = verbose
+    cfg["GLOBAL"]["VERBOSE"] = verbose
+
+    # Force rerun
+    cfg["GLOBAL"]["FORCE"] = force
 
     # Set base path
-    basepath: Path | str = cfg["global"].get("base", config.parent)
+    basepath: Path | str = cfg["GLOBAL"].get("BASE", config.parent)
     base: Path = Path(basepath).resolve()
-    cfg["global"]["base"] = base
+    cfg["GLOBAL"]["BASE"] = base
 
     # Set output path
-    output = cfg["global"].get("output")
-    if isinstance(output, str):
-        outpath = Path(output)
-    else:
-        outpath = Path("output")
+    output = cfg["GLOBAL"].get("OUTPUT")
+    outpath = Path(output) if isinstance(output, str) else Path("output")
     if not outpath.is_absolute():
         outpath = base / outpath
     outpath = outpath.resolve()
     if not outpath.exists():
         outpath.mkdir(parents=True)
-    cfg["global"]["output"] = outpath
+    cfg["GLOBAL"]["OUTPUT"] = outpath
 
     # Store results
-    cfg["global"]["results"] = {}
+    cfg["GLOBAL"]["RESULTS"] = {}
 
     # Setup logging
     log.setup(verbose, outpath)
-    cfg["global"]["log"] = log
+    cfg["GLOBAL"]["LOG"] = log
 
     # Run Steps
-    steps = list(filter(lambda step: step != "global", cfg.keys()))
+    steps = list(filter(lambda step: step != "GLOBAL", cfg.keys()))
     for step in steps:
         cls = STEPS.get(step.upper())
         if cls is None:
@@ -64,9 +78,18 @@ def cli(verbose: bool, config: Path):
             continue
         try:
             cfg = cls(cfg).run().result()
-        except Exception as e:
-            log.error(str(e))
+        except Exception:
+            log.exception(traceback.format_exc())
             return False
+
+    # Run any analysis
+    for step in cfg["GLOBAL"]["RESULTS"].values():
+        try:
+            step.analyse()
+        except Exception:
+            log.exception(traceback.format_exc())
+            return False
+    return True
 
 
 def main() -> None:

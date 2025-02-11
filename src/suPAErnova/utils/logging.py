@@ -1,30 +1,39 @@
+from typing import TYPE_CHECKING
 import logging
+
 import coloredlogs
-from pathlib import Path
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
-def log(msg: str, level: int):
+def log(msg: str, level: int) -> None:
     logger = logging.getLogger()
     logger.log(level, msg)
 
 
-def error(msg: str):
+def exception(msg: str) -> None:
+    logger = logging.getLogger()
+    logger.error(msg)
+
+
+def error(msg: str) -> None:
     log(msg, logging.ERROR)
 
 
-def warn(msg: str):
-    log(msg, logging.WARN)
+def warning(msg: str) -> None:
+    log(msg, logging.WARNING)
 
 
-def info(msg: str):
+def info(msg: str) -> None:
     log(msg, logging.INFO)
 
 
-def debug(msg: str):
+def debug(msg: str) -> None:
     log(msg, logging.DEBUG)
 
 
-def setup(verbose: bool, output: Path):
+def setup(verbose: bool, output: "Path") -> None:
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
@@ -36,20 +45,20 @@ def setup(verbose: bool, output: Path):
     fmt = fmt_debug if verbose else fmt_info
 
     level_styles = coloredlogs.parse_encoded_styles(
-        "debug=8;info=green;warning=yellow;error=red,bold;critical=red,inverse"
+        "debug=8;info=green;warning=yellow;error=red,bold;critical=red,inverse",
     )
 
     file_handler = logging.FileHandler(logfile, mode="w")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(
-        coloredlogs.ColoredFormatter(fmt_debug, level_styles=level_styles)
+        coloredlogs.ColoredFormatter(fmt_debug, level_styles=level_styles),
     )
     logger.addHandler(file_handler)
 
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(level)
     stream_handler.setFormatter(
-        coloredlogs.ColoredFormatter(fmt, level_styles=level_styles)
+        coloredlogs.ColoredFormatter(fmt, level_styles=level_styles),
     )
     logger.addHandler(stream_handler)
 
