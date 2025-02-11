@@ -13,6 +13,7 @@ from suPAErnova.config.requirements import Requirement
 if TYPE_CHECKING:
     from typing import ClassVar
     from logging import Logger
+    from collections.abc import Sequence
 
     from suPAErnova.utils.typing import CFG
     from suPAErnova.config.requirements import REQ, RequirementReturn
@@ -66,7 +67,30 @@ callbacks = Requirement[dict, dict](
 )
 
 
-class Step:
+class Callback:
+    def __init__(self) -> None:
+        self.callbacks: dict[str, dict[str, Callable[[Self], None]]] = {}
+
+
+S = TypeVar("S", bound=Callback)
+
+
+def callback(fn: "Callable[[S], Any]"):
+    def wrapper(self: S):
+        callbacks = self.callbacks.get(fn.__name__.upper(), {})
+        pre_callback = callbacks.get("pre")
+        if pre_callback is not None:
+            pre_callback(self)
+        rtn = fn(self)
+        post_callback = callbacks.get("post")
+        if post_callback is not None:
+            post_callback(self)
+        return rtn
+
+    return wrapper
+
+
+class Step(Callback):
     required: "ClassVar[list[REQ]]" = []
     optional: "ClassVar[list[REQ]]" = [force, analysis, callbacks]
     prev: "ClassVar[list[str]]" = []
@@ -140,6 +164,7 @@ class Step:
         # raw_callbacks: Callable[[Self], None] = self.opts["CALLBACKS"]
         # self.callbacks: Callable[[Self], None] = MethodType(raw_callbacks, self)
 
+    @callback
     def validate(self) -> bool:
         for step in self.prev:
             if self.global_cfg["RESULTS"].get(step) is None:
@@ -174,7 +199,7 @@ class Step:
             self.opts[key] = result
         return True
 
-    def tqdm(self, lst, *args, **kwargs):
+    def tqdm(self, lst: "Sequence[Any]", *args, **kwargs):
         return lst if not self.global_cfg["VERBOSE"] else tqdm(lst, *args, **kwargs)
 
     @abstractmethod
@@ -189,6 +214,7 @@ class Step:
     def _run(self) -> "RequirementReturn[None]":
         return True, None
 
+    @callback
     def run(self):
         self.log.info(f"Running {self.name}")
         should_run = not self._is_completed()
@@ -214,6 +240,7 @@ class Step:
     def _result(self) -> "RequirementReturn[None]":
         return True, None
 
+    @callback
     def result(self):
         self.log.info(f"Storing {self.name} results")
         try:
@@ -234,6 +261,7 @@ class Step:
     def _analyse(self) -> "RequirementReturn[None]":
         return True, None
 
+    @callback
     def analyse(self) -> None:
         self.log.info(f"Analysing {self.name}")
         try:
@@ -250,24 +278,6 @@ class Step:
                 self.log.error(f"Unknown analysis function: {key}")
             else:
                 fn(self, opts)
-
-
-S = TypeVar("S", bound=Step)
-
-
-def callback(fn: "Callable[[S], None]"):
-    def wrapper(self: S):
-        callbacks = self.callbacks.get(fn.__name__.upper(), {})
-        pre_callback = callbacks.get("pre")
-        if pre_callback is not None:
-            pre_callback(self)
-        rtn = fn(self)
-        post_callback = callbacks.get("post")
-        if post_callback is not None:
-            post_callback(self)
-        return rtn
-
-    return wrapper
 
 
 from suPAErnova.steps.data import Data
