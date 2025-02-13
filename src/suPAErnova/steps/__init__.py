@@ -13,7 +13,7 @@ from suPAErnova.config.requirements import Requirement
 if TYPE_CHECKING:
     from typing import ClassVar
     from logging import Logger
-    from collections.abc import Sequence
+    from collections.abc import Iterable
 
     from suPAErnova.utils.typing import CFG
     from suPAErnova.config.requirements import REQ, RequirementReturn
@@ -119,6 +119,7 @@ class Step(Callback):
     def __init__(self, config: "CFG") -> None:
         super().__init__()
         self.name: str = self.__class__.__name__.upper()
+        self.is_setup: bool = False
 
         self.orig_config: CFG = config
         self.global_cfg: CFG = config["GLOBAL"]
@@ -199,7 +200,7 @@ class Step(Callback):
             self.opts[key] = result
         return True
 
-    def tqdm(self, lst: "Sequence[Any]", *args, **kwargs):
+    def tqdm(self, lst: "Iterable[Any]", *args, **kwargs):
         return lst if not self.global_cfg["VERBOSE"] else tqdm(lst, *args, **kwargs)
 
     @abstractmethod
@@ -209,6 +210,23 @@ class Step(Callback):
     @abstractmethod
     def _load(self) -> None:
         pass
+
+    @abstractmethod
+    def _setup(self) -> "RequirementReturn[None]":
+        return True, None
+
+    @callback
+    def setup(self) -> None:
+        self.log.info(f"Setting up {self.name}")
+        try:
+            ok, result = self._setup()
+        except Exception:
+            ok = "Exception"
+            result = traceback.format_exc()
+            self.log.exception(f"Error setting up {self.name}: {result}")
+        if not ok:
+            self.log.error(f"Error running {self.name}: {result}")
+        self.is_setup = True
 
     @abstractmethod
     def _run(self) -> "RequirementReturn[None]":
@@ -230,7 +248,6 @@ class Step(Callback):
                 self.log.exception(f"Error running {self.name}: {result}")
             if not ok:
                 self.log.error(f"Error running {self.name}: {result}")
-                #       or save self.sne to file
         else:
             self.log.info(f"{self.name} already completed, loading previous result")
             self._load()
@@ -281,7 +298,7 @@ class Step(Callback):
 
 
 from suPAErnova.steps.data import Data
-from suPAErnova.steps.model import Model
-from suPAErnova.steps.autoencoder import AutoEncoder
+from suPAErnova.steps.model import ModelStep
+from suPAErnova.steps.tf_autoencoder import TF_AutoEncoder
 
-__all__ = ["AutoEncoder", "Data", "Model", "Step"]
+__all__ = ["Data", "ModelStep", "Step", "TF_AutoEncoder"]

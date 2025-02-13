@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, final, override
+from typing import TYPE_CHECKING, cast, final, override
 
 import numpy as np
 import pandas as pd
@@ -7,7 +7,7 @@ from suPAErnova.steps import Step, callback
 from suPAErnova.config.data import optional, required
 
 if TYPE_CHECKING:
-    from typing import Literal, TypeVar
+    from typing import TypeVar
     from pathlib import Path
     from collections.abc import Iterable, Sequence
 
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
     from suPAErnova.utils.typing import CFG
+    from suPAErnova.config.requirements import RequirementReturn
 
     T = TypeVar("T", bound=np.generic)
 
@@ -30,6 +31,7 @@ class Data(Step):
 
         # Default
         self.datapath = self.outpath / "data.npz"
+        self.snepath = self.outpath / "sne.pkl"
         self.trainpath = self.outpath / "train"
         if not self.trainpath.exists():
             self.trainpath.mkdir(parents=True)
@@ -39,39 +41,98 @@ class Data(Step):
 
         # Load from config file
         # Required
-        self.metapath: Path = self.opts["META"]
-        self.idrpath: Path = self.opts["IDR"]
-        self.maskpath: Path = self.opts["MASK"]
+        self.metapath: Path
+        self.idrpath: Path
+        self.maskpath: Path
 
         # Optional
         # SALT Setup
-        self.cosmo: cosmo.FlatLambdaCDM = self.opts["COSMO"]
-        self.snmodel: sncosmo.SALT2Source | sncosmo.SALT3Source = self.opts["SALT"]
+        self.cosmo: cosmo.FlatLambdaCDM
+        self.snmodel: sncosmo.SALT2Source | sncosmo.SALT3Source
+
+        # Quality Cuts
+        self.min_phase: int
+        self.max_phase: int
+
+        # Train and Test split
+        self.train_frac: float
+        self.test_frac: float
+        self.nkfold: int
+        self.seed: int
+        self.rng: np.random.Generator
+
+        # Generate in self._run()
+        # Lengths
+        self.n_sn: int
+        self.nspectra_per_sn: npt.NDArray[np.int16]
+        self.wavelength: pd.Series
+        self.n_timemax: int
+        self.n_timemin: int
+        self.n_wavelength: int
+
+        # Data Products
+        self.sne: pd.DataFrame
+        self.data: CFG
+        self.train_data: list[CFG]
+        self.test_data: list[CFG]
+
+    @override
+    def _setup(self):
+        # Load from config file
+        # Required
+        self.metapath = cast("Path", self.opts["META"])
+        self.idrpath = cast("Path", self.opts["IDR"])
+        self.maskpath = cast("Path", self.opts["MASK"])
+
+        # Optional
+        # SALT Setup
+        self.cosmo = cast("cosmo.FlatLambdaCDM", self.opts["COSMO"])
+        self.snmodel = cast(
+            "sncosmo.SALT2Source | sncosmo.SALT3Source",
+            self.opts["SALT"],
+        )
         self.log.debug(f"SALT model parameters are: {self.snmodel.param_names}")
 
         # Quality Cuts
-        self.min_phase = self.opts["MIN_PHASE"]
-        self.max_phase = self.opts["MAX_PHASE"]
+        self.min_phase = cast("int", self.opts["MIN_PHASE"])
+        self.max_phase = cast("int", self.opts["MAX_PHASE"])
 
         # Train and Test split
-        self.train_frac = self.opts["TRAIN_FRAC"]
+        self.train_frac = cast("float", self.opts["TRAIN_FRAC"])
         self.test_frac = 1 - self.train_frac
         self.nkfold = int(1.0 / self.test_frac)
         self.seed = self.opts["SEED"]
         self.rng = np.random.default_rng(self.seed)
 
-        # Generate in self._run()
-        # Lengths
-        self.n_sn: int | None = None
-        self.n_timemax: int | None = None
-        self.n_timemin: int | None = None
-        self.n_wavelength: int | None = None
+        self.train_data = []
+        self.test_data = []
 
-        # Data Products
-        self.sne: pd.DataFrame | None = None
-        self.data: CFG | None = None
-        self.train_data: list[CFG] = []
-        self.test_data: list[CFG] = []
+        return (True, None)
+
+    @callback
+    def get_dims(self) -> None:
+        # --- Get Dimensions ---
+        # Number of SNe
+        self.n_sn = n_sn = len(self.sne)
+        self.log.debug(f"Number of SNe: {n_sn}")
+
+        # Maximum number of observations for any given SN
+        self.nspectra_per_sn = np.array(
+            [len(spectra) for spectra in self.sne["spectra"]],
+            dtype=np.int16,
+        )
+        self.n_timemax = self.nspectra_per_sn.max()
+        self.n_timemin = self.nspectra_per_sn.min()
+        self.log.debug(
+            f"Maximum number of observations for any given SN: {self.n_timemax}",
+        )
+
+        # Wavelength grid
+        # Since all spectra share the same wavelength grid
+        # Just get the wavelength grid of the first spectrum
+        self.wavelength = cast("pd.Series", self.sne["spectra"][0]["data"][0]["wave"])
+        self.n_wavelength = len(self.wavelength)
+        self.log.debug(f"Length of wavelength grid: {self.n_wavelength}")
 
     #
     # === Required Functions ===
@@ -129,7 +190,10 @@ class Data(Step):
         # Split data into two dataframes
         # A SN dataframe which contains one row per SN, and the following columns
         sne_cols = ["sn", "MB", "x0", "x1", "c", "z", "hubble_resid", "mjd", "dphase"]
-        sne = sn_data[sne_cols].drop_duplicates().reset_index(drop=True)
+        sne = cast(
+            "pd.DataFrame",
+            sn_data[sne_cols].drop_duplicates().reset_index(drop=True),
+        )
 
         # A Spectra dtaaframe which contains one row per spectra, and the following columns
         # Note that we keep the sn column so that we can match each spectra with their SN
@@ -142,13 +206,16 @@ class Data(Step):
             "wavelength_min",
             "wavelength_max",
         ]
-        spectra = sn_data[spec_cols].reset_index(drop=True)
+        spectra = cast("pd.DataFrame", sn_data[spec_cols].reset_index(drop=True))
 
         self.log.debug(
             f"Cutting spectra with phases outside the range {self.min_phase} <= phase <= {self.max_phase}",
         )
         self.log.debug(f"Number of spectra before phase-cut: {len(spectra)}")
-        spectra = spectra[spectra["phase"].between(self.min_phase, self.max_phase)]
+        spectra = cast(
+            "pd.DataFrame",
+            spectra[spectra["phase"].between(self.min_phase, self.max_phase)],
+        )
         self.log.debug(f"Number of spectra after phase-cut: {len(spectra)}")
 
         self.log.debug("Loading Spectra data")
@@ -166,7 +233,7 @@ class Data(Step):
         ]
 
         self.log.debug("Linking Spectra with SNe")
-        sne["spectra"] = sne["sn"].apply(
+        sne["spectra"] = cast("pd.Series", sne["sn"]).apply(
             lambda sn_name: spectra[spectra["sn"] == sn_name].reset_index(drop=True),
         )
 
@@ -198,18 +265,13 @@ class Data(Step):
 
     @callback
     def calculate_salt_flux(self) -> None:
-        if not isinstance(self.sne, pd.DataFrame):
-            self.log.error("Tried to generate SALT data without first loading SNe")
-            return
-
         def get_salt_flux(
-            wavelength: "float | Sequence[float]",
+            wavelength: "float | Iterable[float]",
             tobs: float = 0.0,
             z: float = 0.0,
             x0: float = 1.0,
             x1: float = 0.0,
             c: float = 0.0,
-            t0: float = 0.0,
             zref: float = 0.05,
         ):
             self.snmodel.set(x0=x0, x1=x1, c=c)
@@ -227,40 +289,29 @@ class Data(Step):
             )
 
         for _, sn in self.sne.iterrows():
-            for _, spectra in sn["spectra"].iterrows():
+            for _, spectra in cast("pd.DataFrame", sn["spectra"]).iterrows():
                 spectra["data"]["salt_flux"] = get_salt_flux(
-                    spectra["data"]["wave"].to_numpy(),
-                    tobs=spectra["phase"],
-                    z=sn["z"],
-                    x0=sn["x0"],
-                    x1=sn["x1"],
-                    c=sn["c"],
+                    cast("pd.Series", spectra["data"]["wave"]).to_numpy(),
+                    tobs=cast("float", spectra["phase"]),
+                    z=cast("float", sn["z"]),
+                    x0=cast("float", sn["x0"]),
+                    x1=cast("float", sn["x1"]),
+                    c=cast("float", sn["c"]),
                 )
 
     @callback
     def transform_data(self) -> None:
-        if not isinstance(self.sne, pd.DataFrame):
-            self.log.error("Tried to generate data without first loading SNe")
-            return
-
         # Each element of data is a 3D Array of shape (n_sn x n_timemax x n_data) where:
         #   n_sn = Number of SNe
         #   n_timemax = Maximum number of observations for any given SN (padded if needed)
         #   n_data = Length of datatype
 
-        # --- Get Dimensions ---
-        # Number of SNe
-        self.n_sn = n_sn = len(self.sne)
-        self.log.debug(f"Number of SNe: {n_sn}")
+        # Set dimensional parameters
+        self.get_dims()
 
-        # Maximum number of observations for any given SN
-        nspectra_per_sn = np.array([len(spectra) for spectra in self.sne["spectra"]])
-        self.n_timemax = n_timemax = nspectra_per_sn.max()
-        self.n_timemin = n_timemin = nspectra_per_sn.min()
-        self.log.debug(f"Maximum number of observations for any given SN: {n_timemax}")
         # Allows for filling an array with padding
-        time_axis = nspectra_per_sn.copy()
-        time_axis.fill(n_timemax)
+        time_axis = self.nspectra_per_sn.copy()
+        time_axis.fill(self.n_timemax)
 
         # --- Get Parameters ---
         self.data = {}
@@ -273,12 +324,12 @@ class Data(Step):
         ) -> "npt.NDArray[T]":
             if isinstance(padding, np.ndarray):
                 padded_arr = np.full(
-                    (n_sn, n_timemax, *padding.shape),
+                    (self.n_sn, self.n_timemax, *padding.shape),
                     padding,
                     dtype=object,
                 )
             else:
-                padded_arr = np.full((n_sn, n_timemax), padding, dtype=object)
+                padded_arr = np.full((self.n_sn, self.n_timemax), padding, dtype=object)
             for i, row in enumerate(arr):
                 row_length = len(row)
                 padded_arr[i, :row_length] = row
@@ -287,20 +338,13 @@ class Data(Step):
         # Given a list of value-per-row of length n_sn
         # Fill each row with n_timemax repeats of that row's value
         def fill_rows(values: "npt.NDArray[T]") -> "npt.NDArray[T]":
-            return np.repeat(values, time_axis).reshape((n_sn, n_timemax))
+            return np.repeat(values, time_axis).reshape((self.n_sn, self.n_timemax))
 
         # Index of each SNe
-        self.data["ind"] = fill_rows(np.array(range(n_sn)))
+        self.data["ind"] = fill_rows(np.array(range(self.n_sn)))
 
         # Number of spectra per SNe
-        self.data["nspectra"] = fill_rows(nspectra_per_sn)
-
-        # Wavelength grid
-        # Since all spectra share the same wavelength grid
-        # Just get the wavelength grid of the first spectrum
-        wavelength = self.sne["spectra"][0]["data"][0]["wave"]
-        self.n_wavelength = n_wavelength = len(wavelength)
-        self.log.debug(f"Length of wavelength grid: {n_wavelength}")
+        self.data["nspectra"] = fill_rows(self.nspectra_per_sn)
 
         # Get SNe parameters
         sne_params = {
@@ -337,9 +381,9 @@ class Data(Step):
 
         # Get spectral data parameters
         spectral_data_params = {
-            "flux": ("flux", np.zeros(n_wavelength)),
-            "sigma": ("sigma", np.zeros(n_wavelength)),
-            "salt_flux": ("salt_flux", np.zeros(n_wavelength)),
+            "flux": ("flux", np.zeros(self.n_wavelength)),
+            "sigma": ("sigma", np.zeros(self.n_wavelength)),
+            "salt_flux": ("salt_flux", np.zeros(self.n_wavelength)),
         }
 
         for data_key, (spectral_data_key, padding) in spectral_data_params.items():
@@ -355,19 +399,14 @@ class Data(Step):
             )
         self.data["wavelength"] = pad(
             [
-                [wavelength.to_numpy() for _ in spectra["data"]]
+                [self.wavelength.to_numpy() for _ in spectra["data"]]
                 for spectra in self.sne["spectra"]
             ],
-            np.zeros(n_wavelength),
+            np.zeros(self.n_wavelength),
         )
 
     @callback
     def calculate_wavelength_mask(self) -> None:
-        if self.data is None:
-            self.log.error(
-                "Tried to calculate wavelength mask without first transforming data",
-            )
-            return
         # Create a mask of wavelength outside of the wavelength limits
         self.data["mask"] = (
             self.data["wl_mask_min"][..., np.newaxis] <= self.data["wavelength"]
@@ -375,12 +414,6 @@ class Data(Step):
 
     @callback
     def calculate_laser_line_mask(self) -> None:
-        if self.data is None:
-            self.log.error(
-                "Tried to calculate wavelength mask without first transforming data",
-            )
-            return
-
         # Mask any huge laser lines, Na D (5674 - 5692A)
         # TODO: Make these options
         # these are large jumps in flux, localized over a few wavelength bins
@@ -414,9 +447,6 @@ class Data(Step):
 
     @callback
     def split_train_test(self) -> None:
-        if self.data is None:
-            self.log.error("Tried to split data without first generating data")
-            return
         # Train test split
         ind_split = int(self.n_sn * self.train_frac)
 
@@ -449,6 +479,7 @@ class Data(Step):
     def _is_completed(self) -> bool:
         return (
             self.datapath.exists()
+            and self.snepath.exists()
             and self.trainpath.exists()
             and len(list(self.trainpath.iterdir())) > 0
             and self.testpath.exists()
@@ -457,23 +488,23 @@ class Data(Step):
 
     @override
     def _load(self) -> None:
-        if self.datapath.exists():
-            # TODO: self.data -> self.sne
-            #       or save self.sne to file
-            self.load_data()
-            self.calculate_salt_flux()
-            # Load data from files
-            self.data = np.load(self.datapath, allow_pickle=True)
-            self.train_data = [
-                np.load(train_data, allow_pickle=True)
-                for train_data in self.trainpath.iterdir()
-                if train_data.is_file()
-            ]
-            self.test_data = [
-                np.load(test_data, allow_pickle=True)
-                for test_data in self.testpath.iterdir()
-                if test_data.is_file()
-            ]
+        # Load SNe DataFrames
+        self.sne = cast("pd.DataFrame", pd.read_pickle(self.snepath))
+        # Calculate data dimensions
+        self.get_dims()
+        # Load data from files
+        self.data = np.load(self.datapath, allow_pickle=True)
+        # Load in training and testing data
+        self.train_data = [
+            np.load(train_data, allow_pickle=True)
+            for train_data in self.trainpath.iterdir()
+            if train_data.is_file()
+        ]
+        self.test_data = [
+            np.load(test_data, allow_pickle=True)
+            for test_data in self.testpath.iterdir()
+            if test_data.is_file()
+        ]
 
     @override
     def _run(self):
@@ -492,24 +523,22 @@ class Data(Step):
         return True, None
 
     @override
-    def _result(self):
+    def _result(self) -> "RequirementReturn[None]":
         if self.force or not self._is_completed():
+            # Save SNe
+            self.log.debug(f"Writing loaded SNe data to {self.snepath}")
+            self.sne.to_pickle(self.snepath)
+
             # Save data
-            if self.data is None:
-                return False, "Data has not been generated"
             self.log.debug(f"Writing generated data to {self.datapath}")
             np.savez_compressed(self.datapath, **self.data)
 
             # Save training data
-            if len(self.train_data) == 0:
-                return False, "Train data has not been generated"
             self.log.debug(f"Writing training data to {self.trainpath}")
             for i, train_data in enumerate(self.tqdm(self.train_data)):
                 np.savez_compressed(self.trainpath / f"kfold_{i:d}.npz", **train_data)
 
             # Save testing data
-            if len(self.test_data) == 0:
-                return False, "Test data has not been generated"
             self.log.debug(f"Writing testing data to {self.testpath}")
             for i, test_data in enumerate(self.tqdm(self.test_data)):
                 np.savez_compressed(self.testpath / f"kfold_{i:d}.npz", **test_data)

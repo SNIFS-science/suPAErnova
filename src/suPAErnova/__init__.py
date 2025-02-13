@@ -5,7 +5,7 @@ import traceback
 import toml
 import click
 
-from suPAErnova.steps import Data, AutoEncoder
+from suPAErnova.steps import Data, TF_AutoEncoder
 from suPAErnova.utils import logging as log
 
 if TYPE_CHECKING:
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from suPAErnova.utils.typing import CFG, INPUT
 
 # --- Constants ---
-STEPS: dict[str, type["Step"]] = {"DATA": Data, "AUTOENCODER": AutoEncoder}
+STEPS: dict[str, type["Step"]] = {"DATA": Data, "TF_AUTOENCODER": TF_AutoEncoder}
 
 
 # --- Utilities ---
@@ -69,22 +69,34 @@ def cli(verbose: bool, force: bool, config: Path) -> bool:
     log.setup(verbose, outpath)
     cfg["GLOBAL"]["LOG"] = log
 
-    # Run Steps
     steps = list(filter(lambda step: step != "GLOBAL", cfg.keys()))
-    for step in steps:
-        cls = STEPS.get(step.upper())
+    # Setup Steps
+    for name in steps:
+        cls = STEPS.get(name.upper())
         if cls is None:
-            missing_step(step)
+            missing_step(name)
             continue
         try:
-            cfg = cls(cfg).run().result()
+            log.info(f"Setting up {name.upper()}")
+            step = cls(cfg)
+            cfg["GLOBAL"]["RESULTS"][step.name] = step
         except Exception:
             log.exception(traceback.format_exc())
             return False
-
+    # Run Steps
+    for step in cfg["GLOBAL"]["RESULTS"].values():
+        try:
+            log.info(f"Running {step.name}")
+            step.setup()
+            step.run()
+            cfg = step.result()
+        except Exception:
+            log.exception(traceback.format_exc())
+            return False
     # Run any analysis
     for step in cfg["GLOBAL"]["RESULTS"].values():
         try:
+            log.info(f"Analysing {step.name}")
             step.analyse()
         except Exception:
             log.exception(traceback.format_exc())
