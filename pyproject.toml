@@ -14,10 +14,15 @@ dependencies = [
     "matplotlib>=3.10.0",
     "pandas>=2.2.3",
     "sncosmo>=2.12.0",
-    "tensorflow>=2.18.0",
     "toml>=0.10.2",
     "tqdm>=4.67.1",
 ]
+
+[dependency-groups]
+default = ["tensorflow>=2.18.0"]
+
+# 2.17.0 is the latest version available for ROCM 6.3
+rocm = ["tensorflow-rocm>=2.17"]
 
 [project.scripts]
 suPAErnova = "suPAErnova:main"
@@ -27,6 +32,18 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 # === Tools ===
+
+[tool.uv]
+
+conflicts = [
+    [
+    { group = "default" },
+    { group = "rocm" },
+    ]
+]
+
+[tool.uv.sources]
+tensorflow-rocm = {url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.3.2/tensorflow_rocm-2.17.0-cp312-cp312-manylinux_2_28_x86_64.whl"}
 
 [tool.basedpyright]
 extends = "../../pyproject.toml"
@@ -38,4 +55,3 @@ extend = "../../pyproject.toml"
 logger-objects = [
     "suPAErnova.utils.logging",
 ]
-

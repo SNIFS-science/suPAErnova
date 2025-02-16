@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from pathlib import Path
 import traceback
 
@@ -11,6 +11,7 @@ from suPAErnova.utils import logging as log
 if TYPE_CHECKING:
     from suPAErnova.steps import Step
     from suPAErnova.utils.typing import CFG, INPUT
+    from suPAErnova.config.requirements import RequirementReturn
 
 # --- Constants ---
 STEPS: dict[str, type["Step"]] = {"DATA": Data, "TF_AUTOENCODER": TF_AutoEncoder}
@@ -26,7 +27,7 @@ def normalise_config(cfg: "INPUT") -> "CFG":
     for k, v in cfg.items():
         val = v
         if isinstance(v, dict):
-            val = normalise_config(v)
+            val = normalise_config(cast("CFG", v))
         rtn[k.upper()] = val
     return rtn
 
@@ -35,7 +36,7 @@ def normalise_config(cfg: "INPUT") -> "CFG":
 @click.option("-v", "--verbose", is_flag=True, type=bool, default=False)
 @click.option("-f", "--force", is_flag=True, type=bool, default=False)
 @click.argument("config", type=click.Path(exists=True, path_type=Path))
-def cli(verbose: bool, force: bool, config: Path) -> bool:
+def cli(verbose: bool, force: bool, config: Path) -> "RequirementReturn[None]":
     cfg: CFG = normalise_config(toml.load(config))
 
     # Setup global config
@@ -81,28 +82,44 @@ def cli(verbose: bool, force: bool, config: Path) -> bool:
             step = cls(cfg)
             cfg["GLOBAL"]["RESULTS"][step.name] = step
         except Exception:
-            log.exception(traceback.format_exc())
-            return False
+            result = traceback.format_exc()
+            log.exception(result)
+            return False, result
     # Run Steps
     for step in cfg["GLOBAL"]["RESULTS"].values():
         try:
             log.info(f"Running {step.name}")
-            step.setup()
-            step.run()
-            cfg = step.result()
+            ok, result = step.setup()
+            if not ok:
+                return ok, result
+            ok, result = step.run()
+            if not ok:
+                return False, result
+            ok, result = step.result()
+            if not ok:
+                return False, result
+            cfg = result
         except Exception:
-            log.exception(traceback.format_exc())
-            return False
+            result = traceback.format_exc()
+            log.exception(result)
+            return False, result
     # Run any analysis
     for step in cfg["GLOBAL"]["RESULTS"].values():
         try:
             log.info(f"Analysing {step.name}")
-            step.analyse()
+            ok, result = step.analyse()
+            if not ok:
+                return False, result
         except Exception:
-            log.exception(traceback.format_exc())
-            return False
-    return True
+            result = traceback.format_exc()
+            log.exception(result)
+            return False, result
+    return True, None
 
 
 def main() -> None:
     cli()
+
+
+if __name__ == "__main__":
+    main()

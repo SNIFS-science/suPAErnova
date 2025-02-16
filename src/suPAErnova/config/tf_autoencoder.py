@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from pathlib import Path
 import itertools
 
@@ -9,10 +9,36 @@ if TYPE_CHECKING:
     from suPAErnova.config.requirements import REQ
 
 
+# Data Settings
+def valid_kfold(kfold: int | list[int] | Literal[True], _1: "CFG", _2: "CFG"):
+    if kfold is not True:
+        if isinstance(kfold, int):
+            kfold = [kfold]
+        if len(set(kfold)) != len(kfold):
+            return (False, f"kfold: {kfold} contains duplicates")
+    return (True, kfold)
+
+
+kfold = Requirement[int | list[int] | bool, list[int] | bool](
+    name="kfold",
+    description="Which kfold(s) to use",
+    default=0,
+    transform=valid_kfold,
+)
+
+validation_frac = Requirement[float, float](
+    name="validation_frac",
+    description="What fraction of training data to split into validation data (or 0 to use test data as validation data)",
+    default=0.0,
+    bounds=(0, 0, 1.0),
+)
+
+data = [kfold, validation_frac]
+
 # Training Settings
-epochs_physical = Requirement[int, int](
-    name="epochs_physical",
-    description="Number of epochs in physical parameter training",
+epochs_colour = Requirement[int, int](
+    name="epochs_colour",
+    description="Number of epochs in colour training",
     default=1000,
 )
 epochs_latent = Requirement[int, int](
@@ -20,15 +46,63 @@ epochs_latent = Requirement[int, int](
     description="Number of epochs in latent training",
     default=1000,
 )
-epochs_final = Requirement[int, int](
-    name="epochs_final",
-    description="Number of epochs in final training",
+epochs_amplitude = Requirement[int, int](
+    name="epochs_amplitude",
+    description="Number of epochs in amplitude training",
+    default=1000,
+)
+epochs_all = Requirement[int, int](
+    name="epochs_all",
+    description="Number of epochs in training all parameters",
     default=5000,
 )
+
 validate_every_n = Requirement[int, int](
     name="validate_every_n",
     description="How many steps between validation",
     default=100,
+)
+
+split_training = Requirement[bool, bool](
+    name="split_training",
+    description="Split training into several stages, otherwise train all parameters at once",
+    default=True,
+)
+
+min_train_redshift = Requirement[float, float](
+    name="min_train_redshift",
+    description="Cut spectral data with redshift below this",
+    default=0.02,
+)
+
+max_train_redshift = Requirement[float, float](
+    name="max_train_redshift",
+    description="Cut spectral data with redshift above this",
+    default=1.0,
+    transform=lambda train_redshift, _, opts: (True, train_redshift)
+    if train_redshift > opts["MIN_TRAIN_REDSHIFT"]
+    else (
+        False,
+        f"max_train_redshift={train_redshift} must be greater than min_train_redshift={opts['MIN_TRAIN_REDSHIFT']}",
+    ),
+)
+
+min_train_phase = Requirement[int, int](
+    name="min_train_phase",
+    description="Cut spectral data with phase below this",
+    default=-10,
+)
+
+max_train_phase = Requirement[int, int](
+    name="max_train_phase",
+    description="Cut spectral data with phase above this",
+    default=40,
+    transform=lambda train_phase, _, opts: (True, train_phase)
+    if train_phase > opts["MIN_TRAIN_PHASE"]
+    else (
+        False,
+        f"max_train_phase={train_phase} must be greater than min_train_phase={opts['MIN_TRAIN_PHASE']}",
+    ),
 )
 
 
@@ -51,7 +125,69 @@ colourlaw = Requirement[str, Path | None](
     transform=valid_colourlaw,
 )
 
-training = [epochs_physical, epochs_latent, epochs_final, colourlaw]
+loss = Requirement[str, str](
+    name="loss",
+    description="Loss function",
+    default="WHUBER",
+    choice=[
+        "MAE",
+        "WMAE",
+        "MSE",
+        "WMSE",
+        "RMSE",
+        "WRMSE",
+        "NGLL",
+        "HUBER",
+        "WHUBER",
+        "MAGNITUDE",
+    ],
+)
+
+batch_size = Requirement[int, int](
+    name="batch_size",
+    description="Size of each batch",
+    default=57,
+    transform=lambda batch, _1, _2: (True, batch)
+    if batch > 0
+    else (False, f"batch_size: {batch} is not strictly positive"),
+)
+
+noise_scale = Requirement[float, float](
+    name="noise_scale",
+    description="Scale of observation uncertainty to include in training",
+    default=1.0,
+)
+
+mask_frac = Requirement[float, float](
+    name="mask_frac",
+    description="Fraction of spectra to randomly mask",
+    default=0.1,
+)
+
+sigma_time = Requirement[int, int](
+    name="sigma_time",
+    description="sigma_time=n: Enforce a constant time uncertainty of n / 50. sigma_time=0: Enforce SALT-based time uncertainties (dphase / 50). sigma_time = -1: Do not enforce any time uncertainties",
+    default=0,
+)
+
+training = [
+    epochs_colour,
+    epochs_latent,
+    epochs_amplitude,
+    epochs_all,
+    validate_every_n,
+    split_training,
+    min_train_redshift,
+    max_train_redshift,
+    min_train_phase,
+    max_train_phase,
+    colourlaw,
+    loss,
+    batch_size,
+    noise_scale,
+    mask_frac,
+    sigma_time,
+]
 
 # Network Settings
 layer_type = Requirement[str, str](
@@ -80,13 +216,31 @@ lr_deltat = Requirement[float, float](
 )
 lr_decay_rate = Requirement[float, float](
     name="lr_decay_rate",
-    description="Learning rate decay percentage",
+    description="Learning rate decay",
     default=0.95,
 )
 lr_decay_steps = Requirement[int, int](
     name="lr_decay_steps",
     description="Learning rate decay steps",
     default=300,
+)
+weight_decay_rate = Requirement[float, float](
+    name="weight_decay_rate",
+    description="Weighted optimiser decay rate",
+    default=0.00001,
+)
+
+optimiser = Requirement[str, str](
+    name="optimiser",
+    description="Which optimiser to use",
+    default="ADAMW",
+    choice=["ADAM", "ADAMW"],
+)
+scheduler = Requirement[str, str](
+    name="scheduler",
+    description="Which scheduler to use (or empty for None)",
+    default="EXPONENTIAL",
+    choice=["", "EXPONENTIAL"],
 )
 
 kernel_regulariser = Requirement[float, float](
@@ -124,6 +278,9 @@ network_settings = [
     lr_deltat,
     lr_decay_rate,
     lr_decay_steps,
+    weight_decay_rate,
+    scheduler,
+    optimiser,
     kernel_regulariser,
     dropout,
     batchnorm,
@@ -193,5 +350,5 @@ dimensions = [cond_dim, encode_dims, decode_dims, latent_dim]
 required: list["REQ"] = []
 optional: list["REQ"] = []
 required_params: list["REQ"] = []
-optional_params: list["REQ"] = [*training, *network_settings, *dimensions]
+optional_params: list["REQ"] = [*data, *training, *network_settings, *dimensions]
 prev: list[str] = []

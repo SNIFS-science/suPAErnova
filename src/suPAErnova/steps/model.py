@@ -60,6 +60,7 @@ class ModelStep(Step):
 
     @override
     def _setup(self):
+        super()._setup()
         model_cls = self.opts["MODEL"]
         if model_cls is None:
             name = self.__class__.__name__.upper()

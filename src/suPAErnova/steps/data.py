@@ -119,7 +119,6 @@ class Data(Step):
         # Maximum number of observations for any given SN
         self.nspectra_per_sn = np.array(
             [len(spectra) for spectra in self.sne["spectra"]],
-            dtype=np.int16,
         )
         self.n_timemax = self.nspectra_per_sn.max()
         self.n_timemin = self.nspectra_per_sn.min()
@@ -326,10 +325,9 @@ class Data(Step):
                 padded_arr = np.full(
                     (self.n_sn, self.n_timemax, *padding.shape),
                     padding,
-                    dtype=object,
                 )
             else:
-                padded_arr = np.full((self.n_sn, self.n_timemax), padding, dtype=object)
+                padded_arr = np.full((self.n_sn, self.n_timemax), padding)
             for i, row in enumerate(arr):
                 row_length = len(row)
                 padded_arr[i, :row_length] = row
@@ -359,7 +357,9 @@ class Data(Step):
         }
 
         for data_key, sne_key in sne_params.items():
-            self.data[data_key] = fill_rows(self.sne[sne_key].to_numpy())
+            self.data[data_key] = fill_rows(
+                self.sne[sne_key].to_numpy(),
+            )
 
         self.data["luminosity_distance"] = self.cosmo.luminosity_distance(
             self.data["redshift"],
@@ -367,10 +367,10 @@ class Data(Step):
 
         # Get Parameters from spectra
         spectra_params = {
-            "spectra_id": ("id", np.str_("")),
-            "phase": ("phase", np.int64(-1)),
-            "wl_mask_min": ("wavelength_min", np.float64(-1)),
-            "wl_mask_max": ("wavelength_max", np.float64(-1)),
+            "spectra_id": ("id", ""),
+            "phase": ("phase", -100.0),
+            "wl_mask_min": ("wavelength_min", -1.0),
+            "wl_mask_max": ("wavelength_max", -1.0),
         }
 
         for data_key, (spectra_key, padding) in spectra_params.items():
@@ -397,6 +397,7 @@ class Data(Step):
                 ],
                 padding,
             )
+
         self.data["wavelength"] = pad(
             [
                 [self.wavelength.to_numpy() for _ in spectra["data"]]
@@ -405,12 +406,38 @@ class Data(Step):
             np.zeros(self.n_wavelength),
         )
 
+        # Finally, ensure everything has the right number of axes
+        for k, v in self.data.items():
+            if len(v.shape) == 2:
+                self.data[k] = v[..., np.newaxis]
+
+    @callback
+    def finalise_data(self) -> None:
+        # Rescale phase to time such that:
+        #   time = 0 -> phase = min_phase
+        #   time = 1 -> phase = max_phase
+        time_mask = self.data["phase"] > -100
+        self.data["time"] = self.data["phase"].copy()
+        self.data["time"][time_mask] = (
+            self.data["time"][time_mask] - self.min_phase
+        ) / (self.max_phase - self.min_phase)
+
+        # Remove negative flux from unmasked fluxes
+        self.data["flux"][self.data["mask"]] = np.clip(
+            self.data["flux"][self.data["mask"]],
+            0,
+            np.inf,
+        )
+
+        # Scale observed uncertainty to account for fitting degrees of freedom, and an error floor
+        self.data["sigma"] = 1.4 * self.data["sigma"] + 4e-10
+
     @callback
     def calculate_wavelength_mask(self) -> None:
         # Create a mask of wavelength outside of the wavelength limits
-        self.data["mask"] = (
-            self.data["wl_mask_min"][..., np.newaxis] <= self.data["wavelength"]
-        ) & (self.data["wavelength"] <= self.data["wl_mask_max"][..., np.newaxis])
+        self.data["mask"] = (self.data["wl_mask_min"] <= self.data["wavelength"]) & (
+            self.data["wavelength"] <= self.data["wl_mask_max"]
+        )
 
     @callback
     def calculate_laser_line_mask(self) -> None:
@@ -487,24 +514,35 @@ class Data(Step):
         )
 
     @override
-    def _load(self) -> None:
+    def _load(self):
         # Load SNe DataFrames
         self.sne = cast("pd.DataFrame", pd.read_pickle(self.snepath))
         # Calculate data dimensions
         self.get_dims()
         # Load data from files
-        self.data = np.load(self.datapath, allow_pickle=True)
+        # Open the file, read each key into a dictionary, then close the file
+        self.data = {}
+        with np.load(self.datapath, allow_pickle=True) as io:
+            for k, v in io.items():
+                self.data[k] = v
         # Load in training and testing data
-        self.train_data = [
-            np.load(train_data, allow_pickle=True)
-            for train_data in self.trainpath.iterdir()
-            if train_data.is_file()
-        ]
-        self.test_data = [
-            np.load(test_data, allow_pickle=True)
-            for test_data in self.testpath.iterdir()
-            if test_data.is_file()
-        ]
+        self.train_data = []
+        for train_data in self.trainpath.iterdir():
+            if train_data.is_file():
+                with np.load(train_data, allow_pickle=True) as io:
+                    data = {}
+                    for k, v in io.items():
+                        data[k] = v
+                    self.train_data.append(data)
+        self.test_data = []
+        for test_data in self.testpath.iterdir():
+            if test_data.is_file():
+                with np.load(test_data, allow_pickle=True) as io:
+                    data = {}
+                    for k, v in io.items():
+                        data[k] = v
+                    self.test_data.append(data)
+        return True, None
 
     @override
     def _run(self):
@@ -518,6 +556,8 @@ class Data(Step):
         self.calculate_wavelength_mask()
         # Provides self.data["mask"]
         self.calculate_laser_line_mask()
+        # Provides self.data["time"], clips self.data["flux"] and scales self.data["sigma"]
+        self.finalise_data()
         # Provides self.train and self.test
         self.split_train_test()
         return True, None

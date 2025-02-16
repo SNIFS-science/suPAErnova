@@ -6,34 +6,11 @@ import numpy as np
 import tensorflow as tf
 
 from suPAErnova.models import PAEModel
+from suPAErnova.model_utils.tf_layers import reduce_max, reduce_min, reduce_sum
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from keras import KerasTensor
-
     from suPAErnova.steps.model import ModelStep
     from suPAErnova.utils.typing import CFG
-
-
-# Define Custom Layers
-def layer(tf_fn: "Callable[[ks.KerasTensor], tf.Tensor]"):
-    class WrappedLayer(layers.Layer):
-        def __init__(self) -> None:
-            super().__init__()
-
-        def call(self, x: "KerasTensor", **kwargs):
-            if isinstance(x, tf.SparseTensor):
-                # Convert sparse tensor to dense tensor
-                x = tf.sparse.to_dense(x)
-            return tf_fn(x, **kwargs)
-
-    return WrappedLayer()
-
-
-reduce_max = layer(tf.reduce_max)
-reduce_min = layer(tf.reduce_min)
-reduce_sum = layer(tf.reduce_sum)
 
 
 @final
@@ -47,14 +24,11 @@ class TFAutoencoder(ks.Model, PAEModel):
         self.train_stage = self.training_params["train_stage"]
 
         self.colourlaw = self.params["COLOURLAW"]
+        self.loss_fn = self.params["LOSS"].upper()
 
         # Network Settings
-        self.layer_type = self.params["LAYER_TYPE"]
+        self.layer_type = self.params["LAYER_TYPE"].upper()
         self.activation = self.params["ACTIVATION"]
-        self.lr = self.params["LR"]
-        self.lr_deltat = self.params["LR_DELTAT"]
-        self.lr_decay_rate = self.params["LR_DECAY_RATE"]
-        self.lr_decay_steps = self.params["LR_DECAY_STEPS"]
 
         if self.params["KERNEL_REGULARISER"] > 0:
             self.kernel_regulariser = ks.regularizers.l2(
@@ -79,16 +53,25 @@ class TFAutoencoder(ks.Model, PAEModel):
         self.decoder = self.build_decoder()
 
     def build_encoder(self):
+        # Input layers
+
+        # Input spectra from a single supernovae: n_timemax x n_wavelength
         inputs_data = layers.Input(shape=(self.time_dim, self.data_dim))
+        # Phase-based conditional layer: n_timemax x cond_dim (typically 1)
         inputs_cond = layers.Input(shape=(self.time_dim, self.cond_dim))
+        # Mask out input layer: n_timemax x n_wavelength
         inputs_mask = layers.Input(shape=(self.time_dim, self.data_dim))
 
-        # Add either a fully connected or convolutional block
+        # If dense, add phase-based conditional layer to input layer
         if self.layer_type == "DENSE":
             x = layers.concatenate([inputs_data, inputs_cond])
         else:
             x = inputs_data
 
+        # For each encode dimension add:
+        #   A dense or convulational layer
+        #   An optional dropout layer
+        #   An optional batch normalisation layer
         for i, n in enumerate(self.encode_dims[:-1]):
             if self.layer_type == "DENSE":
                 x = layers.Dense(
@@ -118,8 +101,8 @@ class TFAutoencoder(ks.Model, PAEModel):
             if self.batchnorm:
                 x = layers.BatchNormalization()(x)
 
+        # If convolutional, add phase-based conditional layer to convolved input layer
         if self.layer_type == "CONVOLUTION":
-            # Reshape to pass to Dense layers
             self.x_shape = x.shape
             x = layers.Reshape((
                 self.x_shape[-3],
@@ -127,13 +110,14 @@ class TFAutoencoder(ks.Model, PAEModel):
             ))(x)
             x = layers.concatenate([x, inputs_cond])
 
-        # Dense Layers
+        # Add dense layer with n_timemax nodes
         x = layers.Dense(
             self.encode_dims[-1],
             activation=self.activation,
             kernel_regularizer=self.kernel_regulariser,
         )(x)
 
+        # Add final layer with n_latent + n_physical nodes
         x = layers.Dense(
             self.latent_dim + self.num_physical_latent_dims,
             kernel_regularizer=self.kernel_regulariser,
@@ -151,14 +135,20 @@ class TFAutoencoder(ks.Model, PAEModel):
             colour = outputs[..., 2:3]
             latent = outputs[..., 3:]
 
+            #
+            # Set the parameters you're not training to 0
+            #
+
+            # Initial training, only train colour
             if self.train_stage == 0:
                 latent *= 0.0
                 amplitude *= 0.0
                 dtime *= 0.0
 
+            # Latent training, train the first `train_stage` latent parameters, and colour
             if 0 < self.train_stage <= self.latent_dim:
                 # Construct Mask
-                latent_train_mask = np.ones(self.latent_dim, dtype=np.float32)
+                latent_train_mask = np.ones(self.latent_dim)
                 latent_train_mask[self.train_stage :] = 0.0
                 latent_train_mask = tf.convert_to_tensor(latent_train_mask)
 
@@ -167,15 +157,17 @@ class TFAutoencoder(ks.Model, PAEModel):
                 amplitude *= 0.0
                 dtime *= 0.0
 
+            # Train colour, all latent dims, and amplitude
             if self.train_stage == self.latent_dim + 1:
                 dtime *= 0.0
+
+            # if self.train_stage > self.latent_dim + 1 then train all parameters
 
             # Make dtime, amplitude, and colour of non-masked SN have mean 0
             if self.training:
                 is_kept = reduce_max(is_kept[..., 0], axis=-1)
                 reduced_is_kept = reduce_sum(is_kept)
 
-                print(dtime, is_kept, dtime * is_kept)
                 batch_mean_dtime = reduce_sum(dtime * is_kept, axis=0) / reduced_is_kept
                 dtime = layers.subtract([dtime, batch_mean_dtime])
 

@@ -208,32 +208,33 @@ class Step(Callback):
         return False
 
     @abstractmethod
-    def _load(self) -> None:
-        pass
+    def _load(self) -> "RequirementReturn[None]":
+        return True, None
 
     @abstractmethod
     def _setup(self) -> "RequirementReturn[None]":
         return True, None
 
     @callback
-    def setup(self) -> None:
+    def setup(self) -> "RequirementReturn[None]":
         self.log.info(f"Setting up {self.name}")
         try:
             ok, result = self._setup()
         except Exception:
-            ok = "Exception"
+            ok = False
             result = traceback.format_exc()
             self.log.exception(f"Error setting up {self.name}: {result}")
         if not ok:
-            self.log.error(f"Error running {self.name}: {result}")
+            return ok, f"Error setting up {self.name}: {result}"
         self.is_setup = True
+        return True, None
 
     @abstractmethod
     def _run(self) -> "RequirementReturn[None]":
         return True, None
 
     @callback
-    def run(self):
+    def run(self) -> "RequirementReturn[None]":
         self.log.info(f"Running {self.name}")
         should_run = not self._is_completed()
         if self.force:
@@ -243,43 +244,48 @@ class Step(Callback):
             try:
                 ok, result = self._run()
             except Exception:
-                ok = "Exception"
+                ok = False
                 result = traceback.format_exc()
                 self.log.exception(f"Error running {self.name}: {result}")
-            if not ok:
-                self.log.error(f"Error running {self.name}: {result}")
         else:
             self.log.info(f"{self.name} already completed, loading previous result")
-            self._load()
-        return self
+            try:
+                ok, result = self._load()
+            except Exception:
+                ok = False
+                result = traceback.format_exc()
+                self.log.exception(f"Error loading {self.name}: {result}")
+        if not ok:
+            return ok, f"Error running {self.name}: {result}"
+        return True, None
 
     @abstractmethod
     def _result(self) -> "RequirementReturn[None]":
         return True, None
 
     @callback
-    def result(self):
+    def result(self) -> "RequirementReturn[CFG]":
         self.log.info(f"Storing {self.name} results")
         try:
             ok, result = self._result()
+            self.global_cfg["RESULTS"][self.name] = self
+            self.orig_config["GLOBAL"] = self.global_cfg
+            self.orig_config[self.name] = self.opts
         except Exception:
             ok = "Exception"  # We handled the exception here so no need to log the error later
             result = traceback.format_exc()
             self.log.exception(f"Error getting results of {self.name}: {result}")
-        if not ok:
-            self.log.error(f"Error getting results of {self.name}: {result}")
-        self.global_cfg["RESULTS"][self.name] = self
-        self.orig_config["GLOBAL"] = self.global_cfg
-        self.orig_config[self.name] = self.opts
         self.log.info(f"Finished running {self.name}")
-        return self.orig_config
+        if not ok:
+            return False, f"Error getting results of {self.name}: {result}"
+        return True, self.orig_config
 
     @abstractmethod
     def _analyse(self) -> "RequirementReturn[None]":
         return True, None
 
     @callback
-    def analyse(self) -> None:
+    def analyse(self) -> "RequirementReturn[None]":
         self.log.info(f"Analysing {self.name}")
         try:
             ok, result = self._analyse()
@@ -287,14 +293,25 @@ class Step(Callback):
             ok = "Exception"  # We handled the exception here so no need to log the error later
             result = traceback.format_exc()
             self.log.exception(f"Error analysing {self.name}: {result}")
+            return False, result
         if not ok:
-            self.log.error(f"Error analysing {self.name}: {result}")
+            return False, f"Error analysing {self.name}: {result}"
         for key, opts in self.opts["ANALYSIS"].items():
             fn = self.analyses.get(key)
             if fn is None:
                 self.log.error(f"Unknown analysis function: {key}")
             else:
-                fn(self, opts)
+                try:
+                    fn(self, opts)
+                    ok = True
+                except Exception:
+                    ok = "Exception"  # We handled the exception here so no need to log the error later
+                    result = traceback.format_exc()
+                    self.log.exception(f"Error analysing {self.name}: {result}")
+                    return False, result
+                if not ok:
+                    return False, f"Error analysing {self.name}: {result}"
+        return True, None
 
 
 from suPAErnova.steps.data import Data
