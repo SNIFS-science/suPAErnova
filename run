@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+
+function run {
+    # Trick ROCm into working
+    export HSA_OVERRIDE_GFX_VERSION=11.0.0
+    # Device Selection
+    local device=0
+    export HIP_VISIBLE_DEVICES="${device}"
+
+
+    uv run suPAErnova -v ../../examples/suPAErnova_data/suPAErnova.toml
+}
+
+run $@
