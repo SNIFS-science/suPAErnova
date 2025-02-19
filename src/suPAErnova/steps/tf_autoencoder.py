@@ -342,6 +342,7 @@ class TF_AutoEncoder(ModelStep):
                 (batch_flux, batch_time, batch_sigma, batch_mask),
                 fn_output_signature=tf.TensorSpec(shape=(1,)),
             )
+            print(batch_results)
 
             # # Loop over batches
             # for batch in range(nbatches):
