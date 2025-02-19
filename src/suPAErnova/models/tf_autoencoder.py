@@ -41,11 +41,11 @@ class TFAutoencoder(ks.Model, PAEModel):
         self.physical_latent = self.params["PHYSICAL_LATENT"]
 
         # Model Dimensions
-        self.time_dim = int(self.data.n_timemax)
-        self.data_dim = self.data.n_wavelength
+        self.n_spectra = int(self.data.n_timemax)
+        self.n_flux = self.data.n_wavelength
         self.cond_dim = self.params["COND_DIM"]
-        self.encode_dims = [*self.params["ENCODE_DIMS"], self.time_dim]
-        self.decode_dims = [self.time_dim, *self.params["DECODE_DIMS"]]
+        self.encode_dims = [*self.params["ENCODE_DIMS"], self.n_spectra]
+        self.decode_dims = [self.n_spectra, *self.params["DECODE_DIMS"]]
         self.latent_dim = self.params["LATENT_DIM"]
         self.num_physical_latent_dims = 3  # [delta t, delta m, Av]
 
@@ -55,18 +55,18 @@ class TFAutoencoder(ks.Model, PAEModel):
     def build_encoder(self):
         # Input layers
 
-        # Input spectra from a single supernovae: n_timemax x n_wavelength
-        inputs_data = layers.Input(shape=(self.time_dim, self.data_dim))
-        # Phase-based conditional layer: n_timemax x cond_dim (typically 1)
-        inputs_cond = layers.Input(shape=(self.time_dim, self.cond_dim))
-        # Mask out input layer: n_timemax x n_wavelength
-        inputs_mask = layers.Input(shape=(self.time_dim, self.data_dim))
+        # Input spectra from a single supernovae
+        inputs_flux = layers.Input(shape=(self.n_spectra, self.n_flux))
+        # Phase-based conditional layer
+        inputs_time = layers.Input(shape=(self.n_spectra, self.cond_dim))
+        # Mask out input layer
+        inputs_mask = layers.Input(shape=(self.n_spectra, self.n_flux))
 
         # If dense, add phase-based conditional layer to input layer
         if self.layer_type == "DENSE":
-            x = layers.concatenate([inputs_data, inputs_cond])
+            x = layers.concatenate([inputs_flux, inputs_time])
         else:
-            x = inputs_data
+            x = inputs_flux
 
         # For each encode dimension add:
         #   A dense or convulational layer
@@ -89,7 +89,7 @@ class TFAutoencoder(ks.Model, PAEModel):
                     activation=self.activation,
                     kernel_regularizer=self.kernel_regulariser,
                     padding="same",
-                    input_shape=(self.time_dim, self.data_dim) if i == 0 else None,
+                    input_shape=(self.n_spectra, self.n_flux) if i == 0 else None,
                 )(x)
 
             if self.dropout > 0:
@@ -108,7 +108,7 @@ class TFAutoencoder(ks.Model, PAEModel):
                 self.x_shape[-3],
                 self.x_shape[-2] * self.x_shape[-1],
             ))(x)
-            x = layers.concatenate([x, inputs_cond])
+            x = layers.concatenate([x, inputs_time])
 
         # Add dense layer with n_timemax nodes
         x = layers.Dense(
@@ -198,7 +198,7 @@ class TFAutoencoder(ks.Model, PAEModel):
                 ])
             outputs = layers.concatenate([dtime, amplitude, colour, latent])
 
-        inputs = [inputs_data, inputs_cond, inputs_mask]
+        inputs = [inputs_flux, inputs_time, inputs_mask]
 
         return ks.Model(inputs=inputs, outputs=outputs)
 
@@ -207,14 +207,14 @@ class TFAutoencoder(ks.Model, PAEModel):
             shape=(self.latent_dim + self.num_physical_latent_dims,),
             name="latent_params",
         )
-        inputs_cond = layers.Input(
-            shape=(self.time_dim, self.cond_dim),
+        inputs_time = layers.Input(
+            shape=(self.n_spectra, self.cond_dim),
             name="conditional_params",
         )
-        inputs_mask = layers.Input(shape=(self.time_dim, self.data_dim))
+        inputs_mask = layers.Input(shape=(self.n_spectra, self.n_flux))
 
         # Repeate latent vector to match number of data timesteps
-        latent = layers.RepeatVector(self.time_dim)(inputs_latent)
+        latent = layers.RepeatVector(self.n_spectra)(inputs_latent)
 
         # Set up physical latent space (if desired)
         if self.physical_latent:
@@ -225,9 +225,9 @@ class TFAutoencoder(ks.Model, PAEModel):
             latent = latent[..., self.num_physical_latent_dims :]
 
             # Concatenate physical (non time-varying) parameters
-            x = layers.concatenate([latent, inputs_cond + dtime])
+            x = layers.concatenate([latent, inputs_time + dtime])
         else:
-            x = layers.concatenate([latent, inputs_cond])
+            x = layers.concatenate([latent, inputs_time])
 
         x = layers.Dense(
             self.decode_dims[0],
@@ -251,7 +251,7 @@ class TFAutoencoder(ks.Model, PAEModel):
                         kernel_regularizer=self.kernel_regulariser,
                     )(x)
                     x = layers.Reshape((
-                        self.time_dim,
+                        self.n_spectra,
                         self.x_shape[-2],
                         self.x_shape[-1],
                     ))(x)
@@ -268,15 +268,15 @@ class TFAutoencoder(ks.Model, PAEModel):
 
         if self.layer_type == "DENSE":
             outputs = layers.Dense(
-                self.data_dim,
+                self.n_flux,
                 kernel_regularizer=self.kernel_regulariser,
             )(x)
         else:
-            outputs = layers.Reshape((self.time_dim, x.shape[-2] * x.shape[-1]))(x)
+            outputs = layers.Reshape((self.n_spectra, x.shape[-2] * x.shape[-1]))(x)
 
         if self.physical_latent:
             colourlaw = layers.Dense(
-                self.data_dim,
+                self.n_flux,
                 kernel_initializer=None
                 if self.colourlaw is None
                 else tf.constant_initializer(self.colourlaw),
@@ -292,18 +292,14 @@ class TFAutoencoder(ks.Model, PAEModel):
         if not self.training:
             outputs = tf.nn.relu(outputs)
 
-        inputs = [inputs_latent, inputs_cond, inputs_mask]
+        inputs = [inputs_latent, inputs_time, inputs_mask]
         # Zero spectra that do not exist
         outputs *= reduce_max(inputs_mask, axis=-1, keepdims=True)
 
         return ks.Model(inputs=inputs, outputs=outputs)
 
-    def encode(self, x, cond, mask):
-        return self.encoder((x, cond, mask))
+    def encode(self, flux, time, mask):
+        return self.encoder((flux, time, mask))
 
-    def decode(self, x, cond, mask):
-        return self.decoder((x, cond, mask))
-
-    def call(self, x):
-        encoded = self.encoder(x)
-        return self.decoder(encoded)
+    def decode(self, flux, time, mask):
+        return self.decoder((flux, time, mask))

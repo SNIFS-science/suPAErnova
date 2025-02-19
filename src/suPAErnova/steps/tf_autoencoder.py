@@ -1,6 +1,7 @@
 import gc
 import time
 from typing import TYPE_CHECKING, Any, cast, final, override
+from itertools import starmap
 
 import numpy as np
 import tensorflow as tf
@@ -58,9 +59,10 @@ class TF_AutoEncoder(ModelStep):
         self.min_train_phase: int
         self.max_train_phase: int
         self.split_training: bool
-        self.noise_scale: tf.Variable
-        self.mask_frac: tf.Variable
-        self.sigma_time: int
+        self.noise_scale: float
+        self.mask_frac: float
+        self.sigma_time: float
+        self.epoch: int
 
         # Network Params
         self.lr: float
@@ -119,8 +121,8 @@ class TF_AutoEncoder(ModelStep):
         self.min_train_phase = self.params["MIN_TRAIN_PHASE"]
         self.max_train_phase = self.params["MAX_TRAIN_PHASE"]
         self.split_training = self.params["SPLIT_TRAINING"]
-        self.noise_scale = tf.Variable(self.params["NOISE_SCALE"], dtype=tf.float32)
-        self.mask_frac = tf.Variable(self.params["MASK_FRAC"], dtype=tf.float32)
+        self.noise_scale = self.params["NOISE_SCALE"]
+        self.mask_frac = self.params["MASK_FRAC"]
         self.sigma_time = self.params["SIGMA_TIME"]
 
         self.lr = self.params["LR"]
@@ -176,123 +178,171 @@ class TF_AutoEncoder(ModelStep):
         # TODO: Add a `get_twins_mask` callback example
 
     def train_step(self, loss: "PolymorphicFunction"):
-        @tf.function
-        def _train_step(epoch: tf.Variable) -> tuple[tf.Tensor, tf.Tensor]:
-            training_loss = tf.convert_to_tensor(0.0)
-            training_loss_terms = tf.convert_to_tensor([0.0, 0.0, 0.0])
-            train_data, test_data, validation_data = self.training_data
-            train_shape = train_data["flux"].shape
-            test_shape = test_data["flux"].shape
-            validation_shape = validation_data["flux"].shape
+        # Everything which is constant throughout each epoch
+        train_data, test_data, validation_data = self.training_data
+        train_flux = train_data["flux"]
+        train_time = train_data["time"]
+        train_sigma = train_data["sigma"]
+        train_mask = train_data["mask"]
+        train_shape = train_flux.shape
 
-            # shuffle indices each epoch for batches
-            # batch feeding can be improved, but the various types of specialized masks/dropout
-            # are easy to implement in this non-optimized fashion, and the dataset is small
+        n_sn, n_spectra, n_flux = train_shape
+        n_batches = n_sn / self.batch_size
 
-            inds = tf.range(train_shape[0])
-            inds = tf.random.shuffle(inds)
-
-            inds = tf.reshape(inds, (-1, self.batch_size))
-            nbatches = inds.shape[0]
-
-            # Add noise during training drawn from observational uncertainty
-            # This seems to slow us down a LOT
-            if self.noise_scale > 0:
-                # Generate a normally-distributed tensor between -1 and 1
-                normal = tf.random.normal(train_shape)
-                # Scale each normal by sigma
-                scaled_normal = normal * train_data["sigma"]
-                # Absolute value
-                abs_normal = tf.abs(scaled_normal)
-                # dflux
-                dflux = self.noise_scale * abs_normal
-            else:
-                dflux = tf.zeros(train_shape)
-
-            # Mask certain spectra
-            # Start with an empty mask which lets everything through
+        dflux = tf.zeros(train_shape)
+        mask_train = ~train_data["mask_train"]
+        if self.mask_frac > 0:
             dmask = tf.ones(train_shape, dtype=tf.int32)
+            # Get the number of unmasked spectra per SN
+            # (n_sn, n_flux)
+            n_spectra_to_shuffle_per_SN = tf.reduce_sum(
+                train_mask,
+                axis=1,
+            )
 
-            # Mask a random fraction of spectra
+            # Calculate the number of spectra to mask for each SN
+            # (n_sn, n_flux)
+            n_spectra_to_mask_per_SN = tf.cast(
+                self.mask_frac * tf.cast(n_spectra_to_shuffle_per_SN, tf.float32),
+                tf.int32,
+            )
+
+            # The indicies of unmasked spectra
+            # (n_unmasked_spectra, 3)
+            unmasked_indices = tf.cast(tf.where(train_mask), dtype=tf.int32)
+
+            # Extract the SN indices and flux indices from shuffle_indices
+            mask_sn_indices = unmasked_indices[:, 0]  # SN indices
+            mask_spectra_indices = unmasked_indices[:, 1]  # Spectra indices
+
+            # Gather the number of spectra to mask for each SN
+            n_spectra_to_mask = tf.gather(n_spectra_to_mask_per_SN, mask_sn_indices)
+            mask_flags = mask_spectra_indices <= n_spectra_to_mask[:, 0]
+
+            # (n_spectra_to_mask, 3)
+            mask_indices = tf.boolean_mask(
+                unmasked_indices,
+                mask_flags,
+            )
+
+            mask_update = tf.zeros(
+                [
+                    tf.shape(mask_indices)[0],
+                ],  # Since the shape of mask_indices is dynamic, use tf.shape
+                dtype=tf.int32,
+            )
+
+            # Mask fraction of spectra
+            dmask = tf.tensor_scatter_nd_update(
+                dmask,
+                mask_indices,
+                mask_update,
+            )
+
+            n_spectra_to_shuffle = tf.gather(
+                n_spectra_to_shuffle_per_SN,
+                mask_sn_indices,
+            )
+
+            shuffle_flags = mask_spectra_indices <= n_spectra_to_shuffle[:, 0]
+            shuffle_indices = tf.boolean_mask(unmasked_indices, shuffle_flags)[
+                :,
+                :-1,
+            ][::n_flux]
+
+            shuffle_sn_indices = shuffle_indices[:, 0]  # SN indices
+            shuffle_spectra_indices = shuffle_indices[:, 1]  # Spectra indices
+
+            ragged_tensor = tf.RaggedTensor.from_value_rowids(
+                shuffle_spectra_indices,
+                shuffle_sn_indices,
+            )
+        else:
+            dmask = mask_train
+
+        # # Vary phase by observational uncertainty
+        train_dphase = train_data["dphase"]
+        dtime = tf.zeros([n_sn, 1, 1])
+
+        # Everything which varies between each epoch
+        @tf.function
+        def _train_step(dflux, dmask, dtime) -> tuple[tf.Tensor, tf.Tensor]:
+            tf.random.set_seed(self.epoch)
+
+            # # Add noise during training drawn from observational uncertainty
+            if self.noise_scale > 0:
+                dflux = self.noise_scale * tf.abs(
+                    train_sigma * tf.random.normal(train_shape),
+                )
+
+            # # Mask a random fraction of spectra
             if self.mask_frac > 0:
-                # Get the number of unmasked spectra per SN
-                # (n_sn, n_flux)
-                n_unmasked_spectra_per_SN = tf.reduce_sum(
-                    train_data["mask"],
+                shuffled_indices = tf.ragged.map_flat_values(
+                    tf.random.shuffle,
+                    ragged_tensor,
+                )
+
+                # Get number of selected elements in total
+                num_selected = tf.shape(shuffled_indices.flat_values)[0]
+
+                # Get batch indices using row_lengths() and tf.range()
+                batch_indices = tf.repeat(
+                    tf.range(shuffled_indices.nrows()),
+                    shuffled_indices.row_lengths(),
+                )
+
+                # Stack to create indices for gather_nd
+                gather_nd_indices = tf.stack(
+                    [batch_indices, shuffled_indices.flat_values],
                     axis=1,
                 )
 
-                # Calculate the number of spectra to mask for each SN
-                # (n_sn, n_flux)
-                n_spectra_to_mask_per_SN = tf.cast(
-                    self.mask_frac * tf.cast(n_unmasked_spectra_per_SN, tf.float32),
-                    tf.int32,
-                )
-
-                # The indicies to update
-                # (n_unmasked_spectra, 3)
-                shuffle_indices = tf.cast(tf.where(train_data["mask"]), dtype=tf.int32)
-
-                # (n_spectra_to_mask, 3)
-                # Extract the SN indices and flux indices from shuffle_indices
-                sn_indices = shuffle_indices[:, 0]  # SN indices
-                spectra_indices = shuffle_indices[:, 1]  # Spectra indices
-
-                # Gather the number of spectra to mask for each SN
-                n_spectra_to_mask = tf.gather(n_spectra_to_mask_per_SN, sn_indices)
-                mask_flags = spectra_indices <= n_spectra_to_mask[:, 0]
-                mask_indices = tf.boolean_mask(
-                    shuffle_indices,
-                    mask_flags,
-                )
-                mask_update = tf.zeros(
-                    [tf.shape(mask_indices)[0]],
-                    dtype=tf.int32,
-                )
-
-                n_spectra_to_shuffle = tf.gather(n_unmasked_spectra_per_SN, sn_indices)
-
-                shuffled_orders = tf.argsort(
-                    tf.random.uniform(
-                        n_spectra_to_shuffle[:, 0],
-                        minval=0,
-                        maxval=1,
-                        dtype=tf.int32,
-                    ),
-                )
-                sn_updates = tf.gather(dmask, shuffled_orders)
-                shuffled_update = tf.concat(sn_updates, axis=0)
-
-                # Mask fraction of spectra
-                dmask = tf.tensor_scatter_nd_update(
+                # Gather from dmask
+                shuffle_update = tf.gather_nd(
                     dmask,
-                    mask_indices,
-                    mask_update,
+                    gather_nd_indices,
                 )
+
                 # Shuffle masked spectra with unmasked
                 dmask = tf.tensor_scatter_nd_update(
                     dmask,
                     shuffle_indices,
-                    shuffled_update,
+                    shuffle_update,
                 )
-            else:
-                # Initialize n_spectra_to_shuffle for the case when mask_frac <= 0
-                n_spectra_to_shuffle = tf.zeros(dmask.shape[0], dtype=tf.int32)
 
-            dmask *= ~train_data["mask_train"]
+                dmask *= mask_train
 
-            # # Vary phase by observational uncertainty
-            # if self.sigma_time < 0:
-            #     dtime = np.zeros(train_data["time"].shape[0])
-            # elif self.sigma_time == 0:
-            #     dtime = rng.normal(0, train_data["dphase"] / 50)
-            # else:
-            #     dtime = rng.normal(
-            #         0,
-            #         self.sigma_time / 50,
-            #         size=(train_data["times"].shape[0], 1, 1),
-            #     )
-            #
+            if self.sigma_time == 0:
+                dtime = (train_dphase / 50) * tf.random.normal([
+                    n_sn,
+                    1,
+                    1,
+                ])
+            elif self.sigma_time > 0:
+                dtime = (self.sigma_time / 50) * tf.random.normal([n_sn, 1, 1])
+
+            # shuffle indices each epoch for batches
+            # batch feeding can be improved, but the various types of specialized masks/dropout
+            # are easy to implement in this non-optimized fashion, and the dataset is small
+            inds = tf.random.shuffle(tf.range(n_sn))
+
+            batch_flux = tf.stack(
+                tf.dynamic_partition(train_flux + dflux, inds, n_batches),
+            )
+            batch_time = tf.stack(
+                tf.dynamic_partition(train_time + dtime, inds, n_batches),
+            )
+            batch_sigma = tf.stack(tf.dynamic_partition(train_sigma, inds, n_batches))
+            batch_mask = tf.stack(
+                tf.dynamic_partition(train_mask * dmask, inds, n_batches),
+            )
+
+            batch_results = tf.map_fn(
+                lambda x: loss(*x),
+                (batch_flux, batch_time, batch_sigma, batch_mask),
+                fn_output_signature=tf.TensorSpec(shape=(1,)),
+            )
+
             # # Loop over batches
             # for batch in range(nbatches):
             #     inds_batch = sorted(inds[batch])
@@ -305,14 +355,6 @@ class TF_AutoEncoder(ModelStep):
             #     batch_sigma = train_data["sigma"][inds_batch]
             #     # Mask + mask variations
             #     batch_mask = train_data["mask"][inds_batch] * dmask[inds_batch]
-            #
-            #     # Transform each array into the default tensor float dtype
-            #     # We wait till this point to do it so that we don't lose any precision prior to downscaling
-            #
-            #     batch_flux = tf.convert_to_tensor(batch_flux, dtype=self.dtype)
-            #     batch_time = tf.convert_to_tensor(batch_time, dtype=self.dtype)
-            #     batch_sigma = tf.convert_to_tensor(batch_sigma, dtype=self.dtype)
-            #     batch_mask = tf.convert_to_tensor(batch_mask, dtype=self.dtype)
             #
             #     # Train batch
             #     batch_training_loss, batch_training_loss_terms = loss(
@@ -327,9 +369,12 @@ class TF_AutoEncoder(ModelStep):
             #     for i, b_loss in enumerate(batch_training_loss_terms):
             #         training_loss_terms[i] += b_loss
             # training_loss_terms = [loss / nbatches for loss in training_loss_terms]
+
+            training_loss = tf.convert_to_tensor(0.0)
+            training_loss_terms = tf.convert_to_tensor([0.0, 0.0, 0.0])
             return training_loss, training_loss_terms
 
-        return _train_step
+        return lambda: _train_step(dflux, dmask, dtime)
 
     # TODO: Make tf.function
     def train_model(
@@ -359,7 +404,7 @@ class TF_AutoEncoder(ModelStep):
                 "weight_decay_rate": self.weight_decay_rate,
             },
         )
-        loss = losses.apply_gradients(optimiser)
+        loss = losses.apply_gradients(optimiser, self.model)
         train_step = self.train_step(loss)
 
         ncol_loss = 4
@@ -371,18 +416,11 @@ class TF_AutoEncoder(ModelStep):
         validation_iteration = 0
         validation_best_iteration = 0
 
-        epoch = tf.Variable(-1, dtype=tf.int32)
-
-        for _epoch in self.tqdm(range(self.epochs)):
-            tf.random.set_seed(_epoch)
-            np.random.seed(_epoch)
-            epoch.assign(_epoch)
+        for epoch in self.tqdm(range(self.epochs)):
+            self.epoch = epoch
             is_best = False
             start_time = time.time()
-
-            training_loss, training_loss_terms = train_step(
-                tf.constant(epoch),
-            )
+            training_loss, training_loss_terms = train_step()
 
             # Get average loss over batches
             training_losses[epoch, 0] = epoch

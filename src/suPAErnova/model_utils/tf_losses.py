@@ -34,7 +34,10 @@ def MAE(
     kwargs: dict[str, tf.Tensor],
 ):
     return tf.reduce_sum(
-        tf.reduce_sum(tf.abs(kwargs["mask"] * (x - x_pred)), axis=(-2, -1)),
+        tf.reduce_sum(
+            tf.abs(tf.cast(kwargs["mask"], tf.float32) * (x - x_pred)),
+            axis=(-2, -1),
+        ),
     )
 
 
@@ -45,6 +48,7 @@ loss_functions = {
 
 def apply_gradients(
     optimiser: "ks.Optimizer",
+    model: "TFAutoencoder",
 ):
     # Because the optimiser creates variables internally
     # We run into issues with the tf.function optimiser
@@ -53,19 +57,18 @@ def apply_gradients(
     # So we just make a new function for each optimiser
     @tf.function
     def _apply_gradients(
-        model: "TFAutoencoder",
-        x: "tf.Tensor",
-        cond: "tf.Tensor",
+        flux: "tf.Tensor",
+        time: "tf.Tensor",
         sigma: "tf.Tensor",
         mask: "tf.Tensor",
     ):
         with tf.GradientTape() as tape:
-            loss, loss_terms = compute_loss(model, x, cond, sigma, mask)
+            loss, loss_terms = compute_loss(model, flux, time, sigma, mask)
         gradients = tape.gradient(loss, model.trainable_variables)
         optimiser.apply_gradients(
             zip(gradients, model.trainable_variables, strict=True),
         )
-        return loss, loss_terms
+        return loss_terms
 
     return _apply_gradients
 
@@ -73,26 +76,27 @@ def apply_gradients(
 @tf.function
 def compute_loss(
     model: "TFAutoencoder",
-    x: "tf.Tensor",
-    cond: "tf.Tensor",
+    flux: "tf.Tensor",
+    time: "tf.Tensor",
     sigma: "tf.Tensor",
     mask: "tf.Tensor",
 ):
     loss_terms = []
-
     # Encode into latent parameters
-    z = model.encode(x, cond, mask)
+    z = model.encode(flux, time, mask)
     # Decode from latent parameters
-    x_pred = model.decode(z, cond, mask)
+    flux_pred = model.decode(z, time, mask)
 
     loss = loss_functions[model.loss_fn](
-        x,
-        x_pred,
+        flux,
+        flux_pred,
         {"sigma": sigma, "mask": mask, "model": model},
     )
-    loss_terms.append(loss)
 
     # TODO: loss_recon
     # TODO: loss_cov
-
-    return loss, loss_terms
+    loss_terms.append(loss)
+    return loss, tf.stack(
+        loss_terms,
+        axis=0,
+    )

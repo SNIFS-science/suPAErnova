@@ -164,10 +164,10 @@ mask_frac = Requirement[float, float](
     default=0.1,
 )
 
-sigma_time = Requirement[int, int](
+sigma_time = Requirement[float, float](
     name="sigma_time",
     description="sigma_time=n: Enforce a constant time uncertainty of n / 50. sigma_time=0: Enforce SALT-based time uncertainties (dphase / 50). sigma_time = -1: Do not enforce any time uncertainties",
-    default=0,
+    default=0.3,
 )
 
 training = [
