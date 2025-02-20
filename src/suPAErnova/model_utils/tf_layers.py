@@ -44,3 +44,11 @@ class ReduceSum(FunctionLayer):
 
 
 reduce_sum = ReduceSum()
+
+
+class Maximum(FunctionLayer):
+    def __init__(self) -> None:
+        super().__init__(tf.maximum)
+
+
+maximum = Maximum()

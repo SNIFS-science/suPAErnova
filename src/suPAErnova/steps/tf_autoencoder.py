@@ -1,7 +1,5 @@
-import gc
 import time
 from typing import TYPE_CHECKING, Any, cast, final, override
-from itertools import starmap
 
 import numpy as np
 import tensorflow as tf
@@ -141,8 +139,10 @@ class TF_AutoEncoder(ModelStep):
             self.kfold = list(range(len(self.data.train_data)))
         else:
             self.kfold = kfold
-        self.train_data = [self.prep_data(self.data.train_data[i]) for i in self.kfold]
-        self.test_data = [self.prep_data(self.data.test_data[i]) for i in self.kfold]
+        self.train_data = [
+            self.prep_data(self.data.train_data[i], "train") for i in self.kfold
+        ]
+        self.test_data = [self.data.test_data[i] for i in self.kfold]
         self.validation_frac = self.params["VALIDATION_FRAC"]
         if self.validation_frac > 0:
             split_train_data = []
@@ -164,16 +164,24 @@ class TF_AutoEncoder(ModelStep):
         else:
             self.validation_data = self.test_data
 
+        self.test_data = [
+            self.prep_data(test_data, "test") for test_data in self.test_data
+        ]
+        self.validation_data = [
+            self.prep_data(validation_data, "validation")
+            for validation_data in self.validation_data
+        ]
+
         return (True, None)
 
-    def prep_data(self, data: "CFG") -> "CFG":
+    def prep_data(self, data: "CFG", data_type: str) -> "CFG":
         redshift_mask = (data["redshift"] >= self.min_train_redshift) & (
             data["redshift"] <= self.max_train_redshift
         )
         phase_mask = (data["phase"] >= self.min_train_phase) & (
             data["phase"] <= self.max_train_phase
         )
-        data["mask_train"] = redshift_mask & phase_mask
+        data[f"mask_{data_type}"] = redshift_mask & phase_mask
         return data
         # TODO: Add a `get_twins_mask` callback example
 
@@ -185,12 +193,27 @@ class TF_AutoEncoder(ModelStep):
         train_sigma = train_data["sigma"]
         train_mask = train_data["mask"]
         train_shape = train_flux.shape
+        mask_train = tf.cast(~tf.cast(train_data["mask_train"], tf.bool), tf.int32)
+
+        test_flux = test_data["flux"]
+        test_time = test_data["time"]
+        test_sigma = test_data["sigma"]
+        test_mask = test_data["mask"]
+        mask_test = tf.cast(~tf.cast(test_data["mask_test"], tf.bool), tf.int32)
+
+        validation_flux = validation_data["flux"]
+        validation_time = validation_data["time"]
+        validation_sigma = validation_data["sigma"]
+        validation_mask = validation_data["mask"]
+        mask_validation = tf.cast(
+            ~tf.cast(validation_data["mask_validation"], tf.bool),
+            tf.int32,
+        )
 
         n_sn, n_spectra, n_flux = train_shape
-        n_batches = n_sn / self.batch_size
+        n_batches = n_sn // self.batch_size
 
         dflux = tf.zeros(train_shape)
-        mask_train = ~train_data["mask_train"]
         if self.mask_frac > 0:
             dmask = tf.ones(train_shape, dtype=tf.int32)
             # Get the number of unmasked spectra per SN
@@ -211,7 +234,6 @@ class TF_AutoEncoder(ModelStep):
             # (n_unmasked_spectra, 3)
             unmasked_indices = tf.cast(tf.where(train_mask), dtype=tf.int32)
 
-            # Extract the SN indices and flux indices from shuffle_indices
             mask_sn_indices = unmasked_indices[:, 0]  # SN indices
             mask_spectra_indices = unmasked_indices[:, 1]  # Spectra indices
 
@@ -266,7 +288,11 @@ class TF_AutoEncoder(ModelStep):
 
         # Everything which varies between each epoch
         @tf.function
-        def _train_step(dflux, dmask, dtime) -> tuple[tf.Tensor, tf.Tensor]:
+        def _train_step(
+            dflux_orig,
+            dmask_orig,
+            dtime_orig,
+        ) -> tuple[tf.Tensor, tf.Tensor]:
             tf.random.set_seed(self.epoch)
 
             # # Add noise during training drawn from observational uncertainty
@@ -274,8 +300,10 @@ class TF_AutoEncoder(ModelStep):
                 dflux = self.noise_scale * tf.abs(
                     train_sigma * tf.random.normal(train_shape),
                 )
+            else:
+                dflux = dflux_orig
 
-            # # Mask a random fraction of spectra
+            # Mask a random fraction of spectra
             if self.mask_frac > 0:
                 shuffled_indices = tf.ragged.map_flat_values(
                     tf.random.shuffle,
@@ -299,18 +327,20 @@ class TF_AutoEncoder(ModelStep):
 
                 # Gather from dmask
                 shuffle_update = tf.gather_nd(
-                    dmask,
+                    dmask_orig,
                     gather_nd_indices,
                 )
 
                 # Shuffle masked spectra with unmasked
                 dmask = tf.tensor_scatter_nd_update(
-                    dmask,
+                    dmask_orig,
                     shuffle_indices,
                     shuffle_update,
                 )
 
                 dmask *= mask_train
+            else:
+                dmask = dmask_orig
 
             if self.sigma_time == 0:
                 dtime = (train_dphase / 50) * tf.random.normal([
@@ -320,62 +350,70 @@ class TF_AutoEncoder(ModelStep):
                 ])
             elif self.sigma_time > 0:
                 dtime = (self.sigma_time / 50) * tf.random.normal([n_sn, 1, 1])
+            else:
+                dtime = dtime_orig
 
             # shuffle indices each epoch for batches
             # batch feeding can be improved, but the various types of specialized masks/dropout
             # are easy to implement in this non-optimized fashion, and the dataset is small
-            inds = tf.random.shuffle(tf.range(n_sn))
+            valid_batches = tf.constant(False)
+            while not valid_batches:
+                inds = tf.random.shuffle(tf.range(n_sn) % n_batches)
 
-            batch_flux = tf.stack(
-                tf.dynamic_partition(train_flux + dflux, inds, n_batches),
-            )
-            batch_time = tf.stack(
-                tf.dynamic_partition(train_time + dtime, inds, n_batches),
-            )
-            batch_sigma = tf.stack(tf.dynamic_partition(train_sigma, inds, n_batches))
-            batch_mask = tf.stack(
-                tf.dynamic_partition(train_mask * dmask, inds, n_batches),
-            )
+                mask = train_mask * dmask
+                batch_mask = tf.stack(tf.dynamic_partition(mask, inds, n_batches))
+
+                valid_batches = tf.reduce_all([
+                    tf.reduce_sum(batch_mask[i]) for i in range(n_batches)
+                ])
+
+            flux = train_flux + dflux
+            batch_flux = tf.stack(tf.dynamic_partition(flux, inds, n_batches))
+
+            time = train_time + dtime
+            batch_time = tf.stack(tf.dynamic_partition(time, inds, n_batches))
+
+            sigma = train_sigma
+            batch_sigma = tf.stack(tf.dynamic_partition(sigma, inds, n_batches))
 
             batch_results = tf.map_fn(
                 lambda x: loss(*x),
                 (batch_flux, batch_time, batch_sigma, batch_mask),
                 fn_output_signature=tf.TensorSpec(shape=(1,)),
             )
-            print(batch_results)
 
-            # # Loop over batches
-            # for batch in range(nbatches):
-            #     inds_batch = sorted(inds[batch])
-            #
-            #     # Flux + flux variations
-            #     batch_flux = train_data["flux"][inds_batch] + dflux[inds_batch]
-            #     # Time + time variations
-            #     batch_time = train_data["time"][inds_batch] + dtime[inds_batch]
-            #     # Flux error
-            #     batch_sigma = train_data["sigma"][inds_batch]
-            #     # Mask + mask variations
-            #     batch_mask = train_data["mask"][inds_batch] * dmask[inds_batch]
-            #
-            #     # Train batch
-            #     batch_training_loss, batch_training_loss_terms = loss(
-            #         self.model,
-            #         batch_flux,
-            #         batch_time,
-            #         batch_sigma,
-            #         batch_mask,
-            #     )
-            #
-            #     training_loss += batch_training_loss
-            #     for i, b_loss in enumerate(batch_training_loss_terms):
-            #         training_loss_terms[i] += b_loss
-            # training_loss_terms = [loss / nbatches for loss in training_loss_terms]
+            training_loss = tf.reduce_sum(batch_results[:, 0])
+            training_loss_terms = tf.reduce_sum(batch_results, axis=0) / n_batches
 
-            training_loss = tf.convert_to_tensor(0.0)
-            training_loss_terms = tf.convert_to_tensor([0.0, 0.0, 0.0])
             return training_loss, training_loss_terms
 
-        return lambda: _train_step(dflux, dmask, dtime)
+        @tf.function
+        def _validation_step():
+            validation_results = loss(
+                validation_flux,
+                validation_time,
+                validation_sigma,
+                validation_mask * mask_validation,
+            )
+            validation_loss = validation_results[0]
+            return validation_loss, validation_results
+
+        @tf.function
+        def _test_step():
+            test_results = loss(
+                test_flux,
+                test_time,
+                test_sigma,
+                test_mask * mask_test,
+            )
+            test_loss = test_results[0]
+            return test_loss, test_results
+
+        return (
+            lambda: _train_step(dflux, dmask, dtime),
+            _validation_step,
+            _test_step,
+        )
 
     # TODO: Make tf.function
     def train_model(
@@ -406,26 +444,55 @@ class TF_AutoEncoder(ModelStep):
             },
         )
         loss = losses.apply_gradients(optimiser, self.model)
-        train_step = self.train_step(loss)
+        train_step, validation_step, test_step = self.train_step(loss)
 
         ncol_loss = 4
-        training_losses = np.zeros((self.epochs, ncol_loss))
+        train_losses = np.zeros((self.epochs, ncol_loss))
         validation_losses = np.zeros((self.epochs, ncol_loss))
-        testing_losses = np.zeros((self.epochs, ncol_loss))
+        test_losses = np.zeros((self.epochs, ncol_loss))
 
         validation_loss_min = 1.0e9
-        validation_iteration = 0
-        validation_best_iteration = 0
+        iteration = 0
+        best_iteration = 0
 
         for epoch in self.tqdm(range(self.epochs)):
             self.epoch = epoch
             is_best = False
             start_time = time.time()
-            training_loss, training_loss_terms = train_step()
+            train_loss, train_loss_terms = train_step()
 
             # Get average loss over batches
-            training_losses[epoch, 0] = epoch
-            training_losses[epoch, 1:] = training_loss_terms
+            train_losses[epoch, 0] = epoch
+            train_losses[epoch, 1:] = train_loss_terms
+
+            end_time = time.time()
+
+            if epoch % self.validate_every_n == 0:
+                t_epoch = end_time - start_time
+
+                validation_loss, validation_loss_terms = validation_step()
+                validation_losses[iteration, 0] = epoch
+                validation_losses[iteration, 1:] = validation_loss_terms
+
+                test_loss, test_loss_terms = test_step()
+                test_losses[iteration, 0] = epoch
+                test_losses[iteration, 1:] = test_loss_terms
+
+                self.log.debug(
+                    # f"\nepoch={epoch:d}, time={end_time - start_time:.3f}s\n (total_loss, loss_recon, loss_cov)\ntrain loss: {train_loss_terms[0]:.2E} {train_loss_terms[1]:.2E} {train_loss_terms[2]:.2E}\nval loss: {validation_loss_terms[0]:.2E} {validation_loss_terms[1]:.2E} {validation_loss_terms[2]:.2E}\ntest loss: {test_loss_terms[0]:.2E} {test_loss_terms[1]:.2E} {test_loss_terms[2]:.2E}",
+                    f"\nepoch={epoch:d}, time={end_time - start_time:.3f}s\n (total_loss, loss_recon, loss_cov)\ntrain loss: {train_loss_terms[0]:.2E}\nval loss: {validation_loss_terms[0]:.2E}\ntest loss: {test_loss_terms[0]:.2E}",
+                )
+
+                previous_validation_decrease = iteration - best_iteration
+                if validation_loss < validation_loss_min:
+                    self.log.debug("Best validation epoch so far, saving model")
+                    is_best = True
+                    best_iteration = iteration
+                    validation_loss_min = min(validation_loss_min, validation_loss)
+                    # self.save_model()
+                iteration += 1
+        # self.save_model()
+        return train_losses, validation_losses, test_losses
 
     @callback
     def train_colour(self) -> None:
@@ -470,6 +537,8 @@ class TF_AutoEncoder(ModelStep):
 
     @override
     def _run(self):
+        # tf.debugging.enable_check_numerics()
+        # tf.debugging.enable_traceback_filtering()
         for data in zip(
             self.train_data,
             self.test_data,
@@ -486,9 +555,11 @@ class TF_AutoEncoder(ModelStep):
                     for d in data
                 ),
             )
+
             if self.split_training:
                 # First train delta Av
                 self.train_colour()
+                # TODO: Load previous model's weight before training
                 # Then train latent parameters
                 self.train_latents()
                 # Then train delta M

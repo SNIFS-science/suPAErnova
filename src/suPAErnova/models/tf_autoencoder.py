@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 
 from suPAErnova.models import PAEModel
-from suPAErnova.model_utils.tf_layers import reduce_max, reduce_min, reduce_sum
+from suPAErnova.model_utils.tf_layers import maximum, reduce_max, reduce_min, reduce_sum
 
 if TYPE_CHECKING:
     from suPAErnova.steps.model import ModelStep
@@ -62,16 +62,11 @@ class TFAutoencoder(ks.Model, PAEModel):
         # Mask out input layer
         inputs_mask = layers.Input(shape=(self.n_spectra, self.n_flux))
 
-        # If dense, add phase-based conditional layer to input layer
         if self.layer_type == "DENSE":
             x = layers.concatenate([inputs_flux, inputs_time])
         else:
             x = inputs_flux
 
-        # For each encode dimension add:
-        #   A dense or convulational layer
-        #   An optional dropout layer
-        #   An optional batch normalisation layer
         for i, n in enumerate(self.encode_dims[:-1]):
             if self.layer_type == "DENSE":
                 x = layers.Dense(
@@ -101,7 +96,6 @@ class TFAutoencoder(ks.Model, PAEModel):
             if self.batchnorm:
                 x = layers.BatchNormalization()(x)
 
-        # If convolutional, add phase-based conditional layer to convolved input layer
         if self.layer_type == "CONVOLUTION":
             self.x_shape = x.shape
             x = layers.Reshape((
@@ -110,24 +104,23 @@ class TFAutoencoder(ks.Model, PAEModel):
             ))(x)
             x = layers.concatenate([x, inputs_time])
 
-        # Add dense layer with n_timemax nodes
         x = layers.Dense(
             self.encode_dims[-1],
             activation=self.activation,
             kernel_regularizer=self.kernel_regulariser,
         )(x)
 
-        # Add final layer with n_latent + n_physical nodes
         x = layers.Dense(
             self.latent_dim + self.num_physical_latent_dims,
             kernel_regularizer=self.kernel_regulariser,
             use_bias=False,
         )(x)
 
-        # Need to mask time samples that do not exist = take mean of non-masked latent variables
-        # return is_kept (N_sn, N_spectra) = 0 if any wavelength bin was masked, as bad value will effect encoding
         is_kept = reduce_min(inputs_mask, axis=-1, keepdims=True)
-        outputs = reduce_sum(x * is_kept, axis=-2) / reduce_sum(is_kept, axis=-2)
+        outputs = reduce_sum(x * is_kept, axis=-2) / maximum(
+            reduce_sum(is_kept, axis=-2),
+            y=1,
+        )
 
         if self.physical_latent:
             dtime = outputs[..., 0:1]
@@ -301,5 +294,5 @@ class TFAutoencoder(ks.Model, PAEModel):
     def encode(self, flux, time, mask):
         return self.encoder((flux, time, mask))
 
-    def decode(self, flux, time, mask):
-        return self.decoder((flux, time, mask))
+    def decode(self, z, time, mask):
+        return self.decoder((z, time, mask))

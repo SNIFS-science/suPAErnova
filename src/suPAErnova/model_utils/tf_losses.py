@@ -1,9 +1,7 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from keras import layers
 import tensorflow as tf
-
-from suPAErnova.model_utils.tf_layers import reduce_max, reduce_min, reduce_sum
 
 if TYPE_CHECKING:
     import keras as ks
@@ -93,9 +91,56 @@ def compute_loss(
         {"sigma": sigma, "mask": mask, "model": model},
     )
 
-    # TODO: loss_recon
-    # TODO: loss_cov
-    loss_terms.append(loss)
+    loss_terms.extend((loss, loss))
+
+    if model.loss_amplitude_offset > 0:
+        loss_amplitude_offset = tf.reduce_mean(
+            tf.abs(tf.reduce_sum((flux - flux_pred) * mask, axis=(-2, -1))),
+        )
+        loss += loss_amplitude_offset * model.loss_amplitude_offset
+
+    if model.loss_amplitude_parameter > 0:
+        z_median = tfp.stats.percentile(z[:, 0], 50, interpolation="midpoint")
+        loss_amplitude = (1 - z_median) ** 2
+        loss += loss_amplitude * model.loss_amplitude_parameter
+
+    if model.loss_covariance > 0:
+        z_cov = z
+        is_kept = tf.reduce_min(mask, axis=-1, keepdims=True)
+        is_kept = tf.reduce_max(is_kept, axis=-2)
+
+        num_kept = tf.cast(tf.reduce_sum(is_kept), tf.float32)
+        mean_z = tf.reduce_sum(z_cov * is_kept, axis=0, keepdims=True) / num_kept
+
+        z_cov = (z_cov - mean_z) * is_kept
+
+        cov_z = tf.matmul(tf.transpose(z_cov), z_cov) / num_kept
+        std_z = tf.sqrt(tf.reduce_sum(z_cov**2, axis=0) / num_kept)
+        std_z = tf.where(std_z < 1e-3, tf.ones(std_z.shape[0]), std_z)
+
+        cov_z /= std_z
+
+        istart = 2
+        iend = cov_z.shape[0]
+        cov_mask = 1 - tf.eye(cov_z.shape[0])
+        if model.decorrelate_dist:
+            istart += 1
+        if not model.decorrelate_all:
+            cov_mask[istart:iend, istart:iend] = 0.0
+
+        loss_cov = tf.reduce_sum(
+            tf.square(tf.math.multiply(cov_z, cov_mask)),
+        ) / tf.reduce_sum(cov_mask)
+
+        loss += loss_cov * model.loss_covariance
+
+        loss_terms.append(loss_cov * model.loss_covariance)
+
+    if model.kernel_regulariser:
+        loss += tf.reduce_sum(model.losses)
+
+    loss_terms[0] = loss
+
     return loss, tf.stack(
         loss_terms,
         axis=0,
