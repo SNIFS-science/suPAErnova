@@ -6,12 +6,13 @@ import toml
 import click
 
 from suPAErnova.steps import Data, TF_AutoEncoder
-from suPAErnova.utils import logging as log
+from suPAErnova.utils import suPAErnova_logging as log
 
 if TYPE_CHECKING:
     from suPAErnova.steps import Step
-    from suPAErnova.utils.typing import CFG, INPUT
     from suPAErnova.config.requirements import RequirementReturn
+    from suPAErnova.utils.suPAErnova_types import CFG, INPUT
+
 
 # --- Constants ---
 STEPS: dict[str, type["Step"]] = {"DATA": Data, "TF_AUTOENCODER": TF_AutoEncoder}

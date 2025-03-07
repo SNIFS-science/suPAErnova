@@ -1,20 +1,15 @@
 from typing import TYPE_CHECKING
 
-from keras import layers
 import tensorflow as tf
+import tensorflow_probability as tfp
 
 if TYPE_CHECKING:
-    import keras as ks
-    import numpy as np
-    from numpy.typing import NDArray
+    from tensorflow import keras as ks
 
     from suPAErnova.models.tf_autoencoder import TFAutoencoder
 
-
 # TODO: Choices
 # choice=[
-#     "MAE",
-#     "WMAE",
 #     "MSE",
 #     "WMSE",
 #     "RMSE",
@@ -26,14 +21,19 @@ if TYPE_CHECKING:
 # ],
 
 
-def MAE(
-    x: "tf.Tensor",
-    x_pred: "tf.Tensor",
-    kwargs: dict[str, tf.Tensor],
-):
+def MAE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     return tf.reduce_sum(
         tf.reduce_sum(
-            tf.abs(tf.cast(kwargs["mask"], tf.float32) * (x - x_pred)),
+            kwargs["mask"] * tf.abs(x - x_pred),
+            axis=(-2, -1),
+        ),
+    )
+
+
+def WMAE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    return tf.reduce_sum(
+        tf.reduce_sum(
+            kwargs["mask"] * tf.abs((x - x_pred) / kwargs["sigma"]),
             axis=(-2, -1),
         ),
     )
@@ -41,6 +41,7 @@ def MAE(
 
 loss_functions = {
     "MAE": MAE,
+    "WMAE": WMAE,
 }
 
 
@@ -79,11 +80,14 @@ def compute_loss(
     sigma: "tf.Tensor",
     mask: "tf.Tensor",
 ):
-    loss_terms = []
     # Encode into latent parameters
     z = model.encode(flux, time, mask)
     # Decode from latent parameters
     flux_pred = model.decode(z, time, mask)
+
+    # Since the mask needs to be multiplied with many other tensors
+    # Cast it to float32 now
+    mask = tf.cast(mask, tf.float32)
 
     loss = loss_functions[model.loss_fn](
         flux,
@@ -91,7 +95,8 @@ def compute_loss(
         {"sigma": sigma, "mask": mask, "model": model},
     )
 
-    loss_terms.extend((loss, loss))
+    # Overall loss, reconstruction loss, and (optionally) covariance loss
+    loss_terms = [None, loss, None]
 
     if model.loss_amplitude_offset > 0:
         loss_amplitude_offset = tf.reduce_mean(
@@ -109,7 +114,7 @@ def compute_loss(
         is_kept = tf.reduce_min(mask, axis=-1, keepdims=True)
         is_kept = tf.reduce_max(is_kept, axis=-2)
 
-        num_kept = tf.cast(tf.reduce_sum(is_kept), tf.float32)
+        num_kept = tf.reduce_sum(is_kept)
         mean_z = tf.reduce_sum(z_cov * is_kept, axis=0, keepdims=True) / num_kept
 
         z_cov = (z_cov - mean_z) * is_kept
@@ -123,10 +128,12 @@ def compute_loss(
         istart = 2
         iend = cov_z.shape[0]
         cov_mask = 1 - tf.eye(cov_z.shape[0])
-        if model.decorrelate_dist:
+        if model.decorrelate_dust:
             istart += 1
         if not model.decorrelate_all:
-            cov_mask[istart:iend, istart:iend] = 0.0
+            cov_mask[istart:iend, istart:iend] = (
+                0.0  # Remove correlation from central region
+            )
 
         loss_cov = tf.reduce_sum(
             tf.square(tf.math.multiply(cov_z, cov_mask)),
@@ -134,7 +141,7 @@ def compute_loss(
 
         loss += loss_cov * model.loss_covariance
 
-        loss_terms.append(loss_cov * model.loss_covariance)
+        loss_terms[-1] = loss_cov * model.loss_covariance
 
     if model.kernel_regulariser:
         loss += tf.reduce_sum(model.losses)

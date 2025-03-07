@@ -13,6 +13,15 @@ type RequirementReturn[T] = tuple[Literal[False], str] | tuple[Literal[True], T]
 IN = TypeVar("IN")
 OUT = TypeVar("OUT")
 
+# TODO: Add more restrictions
+#       positive / strictly positive
+#       negative / strictly negative
+#       min but not max
+#       max but not min
+#       max with min of 0
+# TODO: Add some default transforms
+#       int | float -> int
+
 
 @final
 class Requirement[IN, OUT]:

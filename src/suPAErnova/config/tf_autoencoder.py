@@ -128,7 +128,7 @@ colourlaw = Requirement[str, Path | None](
 loss = Requirement[str, str](
     name="loss",
     description="Loss function",
-    default="WHUBER",
+    default="WMAE",
     choice=[
         "MAE",
         "WMAE",
@@ -141,6 +141,45 @@ loss = Requirement[str, str](
         "WHUBER",
         "MAGNITUDE",
     ],
+)
+
+loss_amplitude_offset = Requirement[float, float](
+    name="loss_amplitude_offset",
+    description="Punish overall difference between real SN spectra and encode-decode spectra. Set to 0.0 to avoid.",
+    default=500.0,
+    transform=lambda offset, _1, _2: (True, offset)
+    if offset >= 0
+    else (False, f"loss_amplitude_offset: {offset} is not positive"),
+)
+
+loss_amplitude_parameter = Requirement[float, float](
+    name="loss_amplitude_parameter",
+    description="Encourage median delta-time to be close to 1.",
+    default=1000.0,
+    transform=lambda param, _1, _2: (True, param)
+    if param >= 0
+    else (False, f"loss_amplitude_parameter: {param} is not positive"),
+)
+
+loss_covariance = Requirement[float, float](
+    name="loss_covariance",
+    description="Apply covariance loss to the physical model parameters",
+    default=50000.0,
+    transform=lambda cov, _1, _2: (True, cov)
+    if cov >= 0
+    else (False, f"loss_covariance: {cov} is not positive"),
+)
+
+decorrelate_dust = Requirement[bool, bool](
+    name="decorrelate_dust",
+    description="Ignore correlations with dust (i.e. colour)",
+    default=True,
+)
+
+decorrelate_all = Requirement[bool, bool](
+    name="decorrelate_all",
+    description="Ignore correlations",
+    default=True,
 )
 
 batch_size = Requirement[int, int](
@@ -183,6 +222,11 @@ training = [
     max_train_phase,
     colourlaw,
     loss,
+    loss_amplitude_offset,
+    loss_amplitude_parameter,
+    loss_covariance,
+    decorrelate_dust,
+    decorrelate_all,
     batch_size,
     noise_scale,
     mask_frac,

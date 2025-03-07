@@ -1,12 +1,5 @@
-import os
-import sys
-import random as rn
-from pathlib import Path
-
 import numpy as np
 import tensorflow as tf
-import tensorflow.keras as tfk
-import tensorflow.keras.layers as tfkl
 
 
 def get_apply_grad_fn():
@@ -20,7 +13,9 @@ def get_apply_grad_fn():
         with tf.GradientTape() as tape:
             loss, loss_terms = compute_loss_ae(model, x, cond, sigma, mask)
         gradients = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(gradients, model.trainable_variables, strict=False))
+        optimizer.apply_gradients(
+            zip(gradients, model.trainable_variables, strict=False)
+        )
 
         return loss, loss_terms
 
@@ -53,7 +48,8 @@ def compute_loss_ae(model, x, cond, sigma, mask):
     if model.params["loss_fn"].upper() == "WMAE":
         loss = tf.reduce_sum(
             tf.reduce_sum(
-                tf.abs((x - x_pred) / (sigma + noise_floor)) * mask, axis=(-2, -1),
+                tf.abs((x - x_pred) / (sigma + noise_floor)) * mask,
+                axis=(-2, -1),
             ),
         )
 
@@ -63,7 +59,8 @@ def compute_loss_ae(model, x, cond, sigma, mask):
     if model.params["loss_fn"].upper() == "WMSE":
         loss = tf.reduce_mean(
             tf.reduce_sum(
-                (x - x_pred) ** 2 / (sigma + noise_floor) ** 2 * mask, axis=(-2, -1),
+                (x - x_pred) ** 2 / (sigma + noise_floor) ** 2 * mask,
+                axis=(-2, -1),
             ),
         )
 
@@ -77,7 +74,8 @@ def compute_loss_ae(model, x, cond, sigma, mask):
         loss = tf.reduce_mean(
             tf.sqrt(
                 tf.reduce_sum(
-                    (x - x_pred) ** 2 / (sigma + noise_floor) ** 2 * mask, axis=(-2, -1),
+                    (x - x_pred) ** 2 / (sigma + noise_floor) ** 2 * mask,
+                    axis=(-2, -1),
                 )
                 / tf.reduce_sum(mask, axis=-2),
             ),

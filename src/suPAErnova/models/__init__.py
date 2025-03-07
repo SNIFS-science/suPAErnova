@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from suPAErnova.steps.data import Data
     from suPAErnova.steps.model import ModelStep
-    from suPAErnova.utils.typing import CFG
+    from suPAErnova.utils.suPAErnova_types import CFG
 
 
 class PAEModel:

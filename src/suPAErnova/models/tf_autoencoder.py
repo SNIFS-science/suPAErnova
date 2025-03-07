@@ -1,16 +1,16 @@
 from typing import TYPE_CHECKING, final
 
-import keras as ks
-from keras import layers
 import numpy as np
 import tensorflow as tf
+from tensorflow import keras as ks
+from tensorflow.keras import layers
 
 from suPAErnova.models import PAEModel
 from suPAErnova.model_utils.tf_layers import maximum, reduce_max, reduce_min, reduce_sum
 
 if TYPE_CHECKING:
     from suPAErnova.steps.model import ModelStep
-    from suPAErnova.utils.typing import CFG
+    from suPAErnova.utils.suPAErnova_types import CFG
 
 
 @final
@@ -25,6 +25,11 @@ class TFAutoencoder(ks.Model, PAEModel):
 
         self.colourlaw = self.params["COLOURLAW"]
         self.loss_fn = self.params["LOSS"].upper()
+        self.loss_amplitude_offset = self.params["LOSS_AMPLITUDE_OFFSET"]
+        self.loss_amplitude_parameter = self.params["LOSS_AMPLITUDE_PARAMETER"]
+        self.loss_covariance = self.params["LOSS_COVARIANCE"]
+        self.decorrelate_dust = self.params["DECORRELATE_DUST"]
+        self.decorrelate_all = self.params["DECORRELATE_ALL"]
 
         # Network Settings
         self.layer_type = self.params["LAYER_TYPE"].upper()
@@ -56,11 +61,17 @@ class TFAutoencoder(ks.Model, PAEModel):
         # Input layers
 
         # Input spectra from a single supernovae
-        inputs_flux = layers.Input(shape=(self.n_spectra, self.n_flux))
+        inputs_flux = layers.Input(
+            shape=(self.n_spectra, self.n_flux),
+            dtype=tf.float32,
+        )
         # Phase-based conditional layer
-        inputs_time = layers.Input(shape=(self.n_spectra, self.cond_dim))
-        # Mask out input layer
-        inputs_mask = layers.Input(shape=(self.n_spectra, self.n_flux))
+        inputs_time = layers.Input(
+            shape=(self.n_spectra, self.cond_dim),
+            dtype=tf.float32,
+        )
+        # Mask input layer
+        inputs_mask = layers.Input(shape=(self.n_spectra, self.n_flux), dtype=tf.int32)
 
         if self.layer_type == "DENSE":
             x = layers.concatenate([inputs_flux, inputs_time])

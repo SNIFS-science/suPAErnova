@@ -10,6 +10,7 @@ function run {
     # Don't immediately fill vram
     export TF_FORCE_GPU_ALLOW_GROWTH="true"
 
+    uv sync
     uv run suPAErnova -v ../../examples/suPAErnova_data/suPAErnova.toml
 }
 

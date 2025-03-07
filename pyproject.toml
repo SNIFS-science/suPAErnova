@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
-    { name = "Patrick Armstrong", email = "patrick.james.1998@gmail.com" }
+    { name = "Patrick Armstrong", email = "patrick.james.1998@gmail.com" },
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -19,10 +19,21 @@ dependencies = [
 ]
 
 [dependency-groups]
-default = ["tensorflow>=2.17.0"]
+dev = ["pandas-stubs>=2.2.3.241126", "types-tensorflow>=2.18.0.20241227"]
+
+default = [
+    "tensorflow>=2.18.0",
+    "tensorflow-probability>=0.25.0",
+    "tf-keras>=2.18.0",
+]
 
 # 2.17.0 is the latest version available for ROCM 6.3
-rocm = ["tensorflow-rocm>=2.17"]
+rocm = [
+    "tensorflow-rocm>=2.17.0,<2.18",
+    "tensorflow-probability>=0.24.0,<0.25",
+    "tf-keras>=2.17.0,<2.18",
+]
+
 
 [project.scripts]
 suPAErnova = "suPAErnova:main"
@@ -34,16 +45,20 @@ build-backend = "hatchling.build"
 # === Tools ===
 
 [tool.uv]
+conflicts = [[{ group = "default" }, { group = "rocm" }]]
+default-groups = [
+    "dev",
+    "rocm",
+] # Change me to your preferred tensorflow version
 
-conflicts = [
-    [
-    { group = "default" },
-    { group = "rocm" },
-    ]
-]
+[[tool.uv.dependency-metadata]]
+name = "tf-keras"
+version = "2.17.0"
+requires-dist = [
+] # Hack to remove tf-keras tensorflow dependency when using tensorflow-rocm
 
 [tool.uv.sources]
-tensorflow-rocm = {url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.3.2/tensorflow_rocm-2.17.0-cp312-cp312-manylinux_2_28_x86_64.whl"}
+tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.3.2/tensorflow_rocm-2.17.0-cp312-cp312-manylinux_2_28_x86_64.whl" }
 
 [tool.basedpyright]
 extends = "../../pyproject.toml"
@@ -52,6 +67,4 @@ extends = "../../pyproject.toml"
 extend = "../../pyproject.toml"
 
 [tool.ruff.lint]
-logger-objects = [
-    "suPAErnova.utils.logging",
-]
+logger-objects = ["suPAErnova.utils.suPAErnova_logging"]

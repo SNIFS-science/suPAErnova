@@ -21,8 +21,8 @@ from suPAErnova.config.tf_autoencoder import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import keras as ks
     from numpy import typing as npt
+    from tensorflow import keras as ks
     from tensorflow.python.types.core import PolymorphicFunction
 
     from suPAErnova.utils.typing import CFG, CONFIG
@@ -42,7 +42,7 @@ class TF_AutoEncoder(ModelStep):
 
         # Model
         self.model_cls: type[TFAutoencoder]
-        self.model: TFAutoencoder
+        self.model: ks.Model
 
         # Training Params
         self.latent_dim: int
@@ -379,9 +379,10 @@ class TF_AutoEncoder(ModelStep):
             batch_results = tf.map_fn(
                 lambda x: loss(*x),
                 (batch_flux, batch_time, batch_sigma, batch_mask),
-                fn_output_signature=tf.TensorSpec(shape=(1,)),
+                fn_output_signature=tf.TensorSpec(shape=(3,)),
             )
 
+            # Overall training loss is the sum of the loss of each batch
             training_loss = tf.reduce_sum(batch_results[:, 0])
             training_loss_terms = tf.reduce_sum(batch_results, axis=0) / n_batches
 
@@ -421,7 +422,7 @@ class TF_AutoEncoder(ModelStep):
         training: bool,
         train_stage: int,
         learning_rate: float,
-    ) -> None:
+    ):
         self.model = self.model_cls(
             self,
             {"training": training, "train_stage": train_stage},
