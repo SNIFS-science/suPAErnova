@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     from logging import Logger
     from collections.abc import Iterable
 
-    from suPAErnova.utils.typing import CFG
     from suPAErnova.config.requirements import REQ, RequirementReturn
+    from suPAErnova.utils.suPAErnova_types import CFG
 
 
 # === Optional Requirements ===

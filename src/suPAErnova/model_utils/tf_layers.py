@@ -1,54 +1,67 @@
 from typing import TYPE_CHECKING, override
 
+import keras as ks
 from keras import layers
 import tensorflow as tf
+
+from suPAErnova.utils.suPAErnova_types import CFG
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import keras as ks
+    from suPAErnova.utils.suPAErnova_types import CONFIG
 
 
+@ks.saving.register_keras_serializable()
 class FunctionLayer(layers.Layer):
-    def __init__(self, fn) -> None:
-        super().__init__()
-        self.fn = fn
+    _function_registry: "CONFIG[Callable]" = {}
+
+    def __init__(self, fn_name: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fn_name = fn_name
+
+    def fn(self):
+        fn = self._function_registry.get(self.fn_name)
+        if fn is None:
+            err = f"Unknown function '{self.fn_name}' during deserialisation"
+            raise ValueError(err)
+        return fn
 
     @override
     def call(self, x: "ks.KerasTensor", **kwargs):
         if isinstance(x, tf.SparseTensor):
             # Convert sparse tensor to dense tensor
             x = tf.sparse.to_dense(x)
-        return self.fn(x, **kwargs)
+        return self.fn()(x, **kwargs)
+
+    @override
+    def get_config(self):
+        config = super().get_config()
+        config["fn_name"] = self.fn_name
+        return config
+
+    @override
+    @classmethod
+    def from_config(cls, config):
+        fn_name = config.pop("fn_name")
+        return cls(fn_name, **config)
+
+    @classmethod
+    def register_function(cls, fn_name: str, fn: "Callable") -> None:
+        cls._function_registry[fn_name] = fn
 
 
-class ReduceMax(FunctionLayer):
-    def __init__(self) -> None:
-        super().__init__(tf.reduce_max)
+FunctionLayer.register_function("reduce_max", tf.reduce_max)
+reduce_max = FunctionLayer("reduce_max")
 
+FunctionLayer.register_function("reduce_min", tf.reduce_min)
+reduce_min = FunctionLayer("reduce_min")
 
-reduce_max = ReduceMax()
+FunctionLayer.register_function("reduce_sum", tf.reduce_sum)
+reduce_sum = FunctionLayer("reduce_sum")
 
+FunctionLayer.register_function("maximum", tf.maximum)
+maximum = FunctionLayer("maximum")
 
-class ReduceMin(FunctionLayer):
-    def __init__(self) -> None:
-        super().__init__(tf.reduce_min)
-
-
-reduce_min = ReduceMin()
-
-
-class ReduceSum(FunctionLayer):
-    def __init__(self) -> None:
-        super().__init__(tf.reduce_sum)
-
-
-reduce_sum = ReduceSum()
-
-
-class Maximum(FunctionLayer):
-    def __init__(self) -> None:
-        super().__init__(tf.maximum)
-
-
-maximum = Maximum()
+FunctionLayer.register_function("relu", tf.nn.relu)
+relu = FunctionLayer("relu")

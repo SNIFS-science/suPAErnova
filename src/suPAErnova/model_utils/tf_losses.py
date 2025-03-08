@@ -58,8 +58,8 @@ def apply_gradients(
     def _apply_gradients(
         flux: "tf.Tensor",
         time: "tf.Tensor",
-        sigma: "tf.Tensor",
         mask: "tf.Tensor",
+        sigma: "tf.Tensor",
     ):
         with tf.GradientTape() as tape:
             loss, loss_terms = compute_loss(model, flux, time, sigma, mask)

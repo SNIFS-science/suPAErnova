@@ -12,8 +12,8 @@ from suPAErnova.config.model import (
 
 if TYPE_CHECKING:
     from suPAErnova.steps.data import Data
-    from suPAErnova.utils.typing import CFG
     from suPAErnova.config.requirements import REQ
+    from suPAErnova.utils.suPAErnova_types import CFG
 
     M = TypeVar("M")
 

@@ -6,7 +6,13 @@ from tensorflow import keras as ks
 from tensorflow.keras import layers
 
 from suPAErnova.models import PAEModel
-from suPAErnova.model_utils.tf_layers import maximum, reduce_max, reduce_min, reduce_sum
+from suPAErnova.model_utils.tf_layers import (
+    relu,
+    maximum,
+    reduce_max,
+    reduce_min,
+    reduce_sum,
+)
 
 if TYPE_CHECKING:
     from suPAErnova.steps.model import ModelStep
@@ -20,8 +26,11 @@ class TFAutoencoder(ks.Model, PAEModel):
         ks.Model.__init__(self)
 
         # Training Settings
+        print(self.training_params)
         self.training = self.training_params["training"]
         self.train_stage = self.training_params["train_stage"]
+        self.learning_rate = self.training_params["learning_rate"]
+        self.moving_means = self.training_params.get("moving_means", [0.0, 0.0, 0.0])
 
         self.colourlaw = self.params["COLOURLAW"]
         self.loss_fn = self.params["LOSS"].upper()
@@ -30,6 +39,8 @@ class TFAutoencoder(ks.Model, PAEModel):
         self.loss_covariance = self.params["LOSS_COVARIANCE"]
         self.decorrelate_dust = self.params["DECORRELATE_DUST"]
         self.decorrelate_all = self.params["DECORRELATE_ALL"]
+        self.save_model = self.params["SAVE_MODEL"]
+        self.load_best = self.params["LOAD_BEST"]
 
         # Network Settings
         self.layer_type = self.params["LAYER_TYPE"].upper()
@@ -186,20 +197,9 @@ class TFAutoencoder(ks.Model, PAEModel):
                 colour = layers.subtract([colour, batch_mean_colour])
 
             else:
-                dtime = layers.subtract([
-                    dtime,
-                    tf.Variable([self.bn_moving_means[0]]),
-                ])
-
-                amplitude = layers.subtract([
-                    amplitude,
-                    tf.Variable([self.bn_moving_means[1]]),
-                ])
-
-                colour = layers.subtract([
-                    colour,
-                    tf.Variable([self.bn_moving_means[3]]),
-                ])
+                dtime -= self.moving_means[0]
+                amplitude -= self.moving_means[1]
+                colour -= self.moving_means[2]
             outputs = layers.concatenate([dtime, amplitude, colour, latent])
 
         inputs = [inputs_flux, inputs_time, inputs_mask]
@@ -294,7 +294,7 @@ class TFAutoencoder(ks.Model, PAEModel):
 
             outputs *= 10 ** (-0.4 * (colourlaw * amplitude))
         if not self.training:
-            outputs = tf.nn.relu(outputs)
+            outputs = relu(outputs)
 
         inputs = [inputs_latent, inputs_time, inputs_mask]
         # Zero spectra that do not exist

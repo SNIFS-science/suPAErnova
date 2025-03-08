@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from typing import Any, Literal
     from collections.abc import Callable, Collection
 
-    from suPAErnova.utils.typing import CFG
+    from suPAErnova.utils.suPAErnova_types import CFG
 
 # --- Types ---
 type RequirementReturn[T] = tuple[Literal[False], str] | tuple[Literal[True], T]

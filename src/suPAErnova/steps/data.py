@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     import sncosmo
     import numpy.typing as npt
 
-    from suPAErnova.utils.typing import CFG
     from suPAErnova.config.requirements import RequirementReturn
+    from suPAErnova.utils.suPAErnova_types import CFG
 
     T = TypeVar("T", bound=np.generic)
 

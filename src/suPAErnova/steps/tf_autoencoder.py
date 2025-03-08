@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, cast, final, override
 
 import numpy as np
 import tensorflow as tf
+from tensorflow import keras as ks
 
 from suPAErnova.steps import ModelStep, callback
 from suPAErnova.model_utils import (
@@ -22,11 +23,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from numpy import typing as npt
-    from tensorflow import keras as ks
     from tensorflow.python.types.core import PolymorphicFunction
 
-    from suPAErnova.utils.typing import CFG, CONFIG
     from suPAErnova.models.tf_autoencoder import TFAutoencoder
+    from suPAErnova.utils.suPAErnova_types import CFG, CONFIG
 
 
 @final
@@ -42,7 +42,12 @@ class TF_AutoEncoder(ModelStep):
 
         # Model
         self.model_cls: type[TFAutoencoder]
-        self.model: ks.Model
+        self.model: TFAutoencoder
+        self.training_params: CFG
+        self.encoder: ks.Model
+        self.decoder: ks.Model
+        self.checkpoint_ind: int
+        self.checkpoint_layer: ks.layers.Layer
 
         # Training Params
         self.latent_dim: int
@@ -61,6 +66,7 @@ class TF_AutoEncoder(ModelStep):
         self.mask_frac: float
         self.sigma_time: float
         self.epoch: int
+        self.training_stage: str
 
         # Network Params
         self.lr: float
@@ -80,6 +86,7 @@ class TF_AutoEncoder(ModelStep):
         ]
         # Data Params
         self.kfold: list[int]
+        self.current_kfold: int
         self.train_data: list[CFG]
         self.test_data: list[CFG]
         self.validation_data: list[CFG]
@@ -90,7 +97,6 @@ class TF_AutoEncoder(ModelStep):
         ]
         self.validation_frac: float
 
-    # # Default
     @staticmethod
     def dtype(dt: "npt.DTypeLike"):
         if np.issubdtype(dt, np.floating):
@@ -122,6 +128,7 @@ class TF_AutoEncoder(ModelStep):
         self.noise_scale = self.params["NOISE_SCALE"]
         self.mask_frac = self.params["MASK_FRAC"]
         self.sigma_time = self.params["SIGMA_TIME"]
+        self.training_stage = "NONE"
 
         self.lr = self.params["LR"]
         self.lr_deltat = self.params["LR_DELTAT"]
@@ -139,6 +146,7 @@ class TF_AutoEncoder(ModelStep):
             self.kfold = list(range(len(self.data.train_data)))
         else:
             self.kfold = kfold
+        self.current_kfold = -1
         self.train_data = [
             self.prep_data(self.data.train_data[i], "train") for i in self.kfold
         ]
@@ -184,6 +192,95 @@ class TF_AutoEncoder(ModelStep):
         data[f"mask_{data_type}"] = redshift_mask & phase_mask
         return data
         # TODO: Add a `get_twins_mask` callback example
+
+    def model_name(self, model: "TFAutoencoder", is_best: bool = False):
+        dname = (
+            self.outpath
+            / f"AE__{self.latent_dim:02d}D__{'-'.join(str(e) for e in model.encode_dims)}-latent_layers__kfold{self.current_kfold:d}"
+        )
+        if not dname.is_dir():
+            dname.mkdir(parents=True, exist_ok=True)
+
+        fname = self.training_stage
+        if is_best:
+            fname += "__best"
+
+        encoder_file = dname / f"{fname}__encoder.keras"
+        decoder_file = dname / f"{fname}__decoder.keras"
+        return encoder_file, decoder_file
+
+    def save_model(
+        self,
+        model: "TFAutoencoder",
+        batch: tuple[tf.Tensor, tf.Tensor, tf.Tensor],
+        is_best: bool = False,
+    ) -> None:
+        if not model.save_model:
+            return
+
+        def _latent_means(
+            mod: "TFAutoencoder",
+        ) -> tuple[
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+        ]:
+            zs = tf.map_fn(
+                lambda x: mod.encode(*x),
+                batch,
+                fn_output_signature=tf.TensorSpec(
+                    shape=(batch[0].shape[1], self.latent_dim + 3),
+                ),
+            )
+
+            num_points = zs.shape[0] * zs.shape[1]
+            mean_zs = zs / num_points
+
+            mean_time = tf.reduce_sum(mean_zs[:, :, 0])
+            mean_flux = tf.reduce_sum(mean_zs[:, :, 1])
+            mean_colour = tf.reduce_sum(mean_zs[:, :, 2])
+
+            return mean_time, mean_flux, mean_colour
+
+        encoder_file, decoder_file = self.model_name(model, is_best)
+
+        model_save = self.model_cls(self, {**model.training_params, "training": False})
+        model_save.encoder.set_weights(model.encoder.get_weights())
+
+        if model.physical_latent:
+            # Calculate mean flux
+            moving_means = _latent_means(model_save)
+
+            # Create new model, normalising on mean flux
+            model_save = self.model_cls(
+                self,
+                {
+                    **model.training_params,
+                    "training": False,
+                    "moving_means": moving_means,
+                },
+            )
+            model_save.encoder.set_weights(model.encoder.get_weights())
+
+        model_save.decoder.set_weights(model.decoder.get_weights())
+
+        model_save.encoder.save(encoder_file)
+        model_save.decoder.save(decoder_file)
+
+    def load_checkpoint(self) -> None:
+        encoder_file, decoder_file = self.model_name(
+            self.model,
+            is_best=self.model.load_best,
+        )
+        self.encoder = ks.models.load_model(encoder_file, compile=False)
+        self.decoder = ks.models.load_model(decoder_file, compile=False)
+
+        if self.encoder is not None:
+            self.checkpoint_ind, self.checkpoint_layer = next(
+                (i, layer)
+                for i, layer in reversed(list(enumerate(self.encoder.layers)))
+                if isinstance(layer, ks.layers.Dense)
+            )
 
     def train_step(self, loss: "PolymorphicFunction"):
         # Everything which is constant throughout each epoch
@@ -292,7 +389,11 @@ class TF_AutoEncoder(ModelStep):
             dflux_orig,
             dmask_orig,
             dtime_orig,
-        ) -> tuple[tf.Tensor, tf.Tensor]:
+        ) -> tuple[
+            tf.Tensor,
+            tf.Tensor,
+            tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],
+        ]:
             tf.random.set_seed(self.epoch)
 
             # # Add noise during training drawn from observational uncertainty
@@ -356,13 +457,17 @@ class TF_AutoEncoder(ModelStep):
             # shuffle indices each epoch for batches
             # batch feeding can be improved, but the various types of specialized masks/dropout
             # are easy to implement in this non-optimized fashion, and the dataset is small
-            valid_batches = tf.constant(False)
+            mask = train_mask * dmask
+            inds = tf.random.shuffle(tf.range(n_sn) % n_batches)
+            batch_mask = tf.stack(tf.dynamic_partition(mask, inds, n_batches))
+
+            # Repeatedly shuffle until all batches have at least one valid SN
+            valid_batches = tf.reduce_all([
+                tf.reduce_sum(batch_mask[i]) for i in range(n_batches)
+            ])
             while not valid_batches:
                 inds = tf.random.shuffle(tf.range(n_sn) % n_batches)
-
-                mask = train_mask * dmask
                 batch_mask = tf.stack(tf.dynamic_partition(mask, inds, n_batches))
-
                 valid_batches = tf.reduce_all([
                     tf.reduce_sum(batch_mask[i]) for i in range(n_batches)
                 ])
@@ -376,9 +481,11 @@ class TF_AutoEncoder(ModelStep):
             sigma = train_sigma
             batch_sigma = tf.stack(tf.dynamic_partition(sigma, inds, n_batches))
 
+            batch = (batch_flux, batch_time, batch_mask, batch_sigma)
+
             batch_results = tf.map_fn(
                 lambda x: loss(*x),
-                (batch_flux, batch_time, batch_sigma, batch_mask),
+                batch,
                 fn_output_signature=tf.TensorSpec(shape=(3,)),
             )
 
@@ -386,15 +493,15 @@ class TF_AutoEncoder(ModelStep):
             training_loss = tf.reduce_sum(batch_results[:, 0])
             training_loss_terms = tf.reduce_sum(batch_results, axis=0) / n_batches
 
-            return training_loss, training_loss_terms
+            return training_loss, training_loss_terms, batch
 
         @tf.function
         def _validation_step():
             validation_results = loss(
                 validation_flux,
                 validation_time,
-                validation_sigma,
                 validation_mask * mask_validation,
+                validation_sigma,
             )
             validation_loss = validation_results[0]
             return validation_loss, validation_results
@@ -404,8 +511,8 @@ class TF_AutoEncoder(ModelStep):
             test_results = loss(
                 test_flux,
                 test_time,
-                test_sigma,
                 test_mask * mask_test,
+                test_sigma,
             )
             test_loss = test_results[0]
             return test_loss, test_results
@@ -417,25 +524,16 @@ class TF_AutoEncoder(ModelStep):
         )
 
     # TODO: Make tf.function
-    def train_model(
-        self,
-        training: bool,
-        train_stage: int,
-        learning_rate: float,
-    ):
-        self.model = self.model_cls(
-            self,
-            {"training": training, "train_stage": train_stage},
-        )
+    def train_model(self) -> None:
+        lr_ini = self.model.learning_rate
         lr = self.scheduler(
-            learning_rate,
+            lr_ini,
             {
                 "lr_decay_steps": self.lr_decay_steps,
                 "lr_decay_rate": self.lr_decay_rate,
                 "weight_decay_rate": self.weight_decay_rate,
             },
         )
-        lr_ini = learning_rate
         optimiser = self.optimiser(
             lr,
             {
@@ -460,7 +558,7 @@ class TF_AutoEncoder(ModelStep):
             self.epoch = epoch
             is_best = False
             start_time = time.time()
-            train_loss, train_loss_terms = train_step()
+            train_loss, train_loss_terms, batch = train_step()
 
             # Get average loss over batches
             train_losses[epoch, 0] = epoch
@@ -487,46 +585,102 @@ class TF_AutoEncoder(ModelStep):
                 previous_validation_decrease = iteration - best_iteration
                 if validation_loss < validation_loss_min:
                     self.log.debug("Best validation epoch so far, saving model")
-                    is_best = True
                     best_iteration = iteration
                     validation_loss_min = min(validation_loss_min, validation_loss)
-                    # self.save_model()
+                    self.save_model(
+                        self.model,
+                        batch[:-1],
+                        is_best=True,
+                    )  # Drop batch_sigma
                 iteration += 1
-        # self.save_model()
-        return train_losses, validation_losses, test_losses
+        self.save_model(self.model, batch[:-1])  # Drop batch_sigma
+        self.load_checkpoint()  # Load best (or last) checkpoint in preperation for the next training stage
 
     @callback
     def train_colour(self) -> None:
         self.log.info("Training colour")
         self.epochs = self.epochs_colour
-        self.train_model(training=True, train_stage=0, learning_rate=self.lr)
+        self.training_stage = "colour"
+        self.training_params = {
+            "training": True,
+            "train_stage": 0,
+            "learning_rate": self.lr,
+        }
+        self.model = self.model_cls(self, self.training_params)
+        self.train_model()
 
     @callback
     def train_latents(self) -> None:
         self.epochs = self.epochs_latent
         for latent in range(self.latent_dim):
             self.log.info(f"Training latent {latent + 1} + previous parameters")
-            self.train_model(training=True, train_stage=latent, learning_rate=self.lr)
+            self.training_stage = f"latent_{latent + 1}"
+            self.training_params = {
+                "training": True,
+                "train_stage": latent + 1,
+                "learning_rate": self.lr,
+            }
+            self.model = self.model_cls(self, self.training_params)
+            init_weights = self.model.encoder.layers[self.checkpoint_ind].get_weights()[
+                0
+            ]
+            weights = self.checkpoint_layer.get_weights()[0]
+            # Overwrite previous checkpoint's training
+            weights[:, latent + 3] = init_weights[:, latent + 3] / 100  # TODO: Why 100?
+            self.encoder.layers[self.checkpoint_ind].set_weights([weights])
+            self.model.encoder.set_weights(self.encoder.get_weights())
+            self.model.decoder.set_weights(self.decoder.get_weights())
+            self.train_model()
 
     @callback
     def train_amplitude(self) -> None:
         self.log.info("Training amplitude + previous parameters")
         self.epochs = self.epochs_amplitude
-        self.train_model(
-            training=True,
-            train_stage=1 + self.latent_dim,
-            learning_rate=self.lr,
-        )
+        self.training_stage = "amplitude"
+        self.training_params = {
+            "training": True,
+            "train_stage": self.latent_dim + 1,
+            "learning_rate": self.lr,
+        }
+        self.model = self.model_cls(self, self.training_params)
+        init_weights = self.model.encoder.layers[self.checkpoint_ind].get_weights()[0]
+        weights = self.checkpoint_layer.get_weights()[0]
+        # Overwrite previous checkpoint's training
+        weights[:, 1] = init_weights[:, 1] / 100  # TODO: Why 100?
+        self.encoder.layers[self.checkpoint_ind].set_weights([weights])
+        self.model.encoder.set_weights(self.encoder.get_weights())
+        self.model.decoder.set_weights(self.decoder.get_weights())
+        self.train_model()
+
+    @callback
+    def train_time(self) -> None:
+        self.log.info("Training time + previous parameters")
+        self.epochs = self.epochs_all
+        self.training_stage = "all"
+        self.training_params = {
+            "training": True,
+            "train_stage": self.latent_dim + 2,
+            "learning_rate": self.lr_deltat,
+        }
+        self.model = self.model_cls(self, self.training_params)
+        init_weights = self.model.encoder.layers[self.checkpoint_ind].get_weights()[0]
+        weights = self.checkpoint_layer.get_weights()[0]
+        # Overwrite previous checkpoint's training
+        weights[:, 0] = init_weights[:, 0] / 100  # TODO: Why 100?
+        self.train_model()
 
     @callback
     def train_all(self) -> None:
         self.log.info("Training all parameters")
         self.epochs = self.epochs_all
-        self.train_model(
-            training=True,
-            train_stage=2 + self.latent_dim,
-            learning_rate=self.lr_deltat,
-        )
+        self.training_stage = "all"
+        self.training_params = {
+            "training": True,
+            "train_stage": self.latent_dim + 2,
+            "learning_rate": self.lr_deltat,
+        }
+        self.model = self.model_cls(self, self.training_params)
+        self.train_model()
 
     @override
     def _is_completed(self) -> bool:
@@ -540,12 +694,15 @@ class TF_AutoEncoder(ModelStep):
     def _run(self):
         # tf.debugging.enable_check_numerics()
         # tf.debugging.enable_traceback_filtering()
-        for data in zip(
-            self.train_data,
-            self.test_data,
-            self.validation_data,
-            strict=True,
+        for kfold, data in enumerate(
+            zip(
+                self.train_data,
+                self.test_data,
+                self.validation_data,
+                strict=True,
+            ),
         ):
+            self.current_kfold = kfold
             self.training_data = cast(
                 "tuple[CONFIG[tf.Tensor], CONFIG[tf.Tensor], CONFIG[tf.Tensor]]",
                 tuple(
@@ -560,13 +717,12 @@ class TF_AutoEncoder(ModelStep):
             if self.split_training:
                 # First train delta Av
                 self.train_colour()
-                # TODO: Load previous model's weight before training
                 # Then train latent parameters
                 self.train_latents()
                 # Then train delta M
                 self.train_amplitude()
-                # Then train delta T (and thus all parameters
-                self.train_all()
+                # Then train delta T (and thus all parameters)
+                self.train_time()
             else:
                 self.train_all()
 

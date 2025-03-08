@@ -7,8 +7,8 @@ import sncosmo
 from suPAErnova.config.requirements import Requirement
 
 if TYPE_CHECKING:
-    from suPAErnova.utils.typing import CFG
     from suPAErnova.config.requirements import REQ
+    from suPAErnova.utils.suPAErnova_types import CFG
 
 #
 # === Requirements ===

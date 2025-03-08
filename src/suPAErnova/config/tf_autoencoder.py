@@ -5,8 +5,8 @@ import itertools
 from suPAErnova.config.requirements import Requirement
 
 if TYPE_CHECKING:
-    from suPAErnova.utils.typing import CFG
     from suPAErnova.config.requirements import REQ
+    from suPAErnova.utils.suPAErnova_types import CFG
 
 
 # Data Settings
@@ -30,7 +30,7 @@ validation_frac = Requirement[float, float](
     name="validation_frac",
     description="What fraction of training data to split into validation data (or 0 to use test data as validation data)",
     default=0.0,
-    bounds=(0, 0, 1.0),
+    bounds=(0.0, 1.0),
 )
 
 data = [kfold, validation_frac]
@@ -209,6 +209,18 @@ sigma_time = Requirement[float, float](
     default=0.3,
 )
 
+save_model = Requirement[bool, bool](
+    name="save_model",
+    description="Whether to save intermediate models during training",
+    default=True,
+)
+
+load_best = Requirement[bool, bool](
+    name="load_best",
+    description="Whether to load the best fitting model, or the final epoch model",
+    default=False,
+)
+
 training = [
     epochs_colour,
     epochs_latent,
@@ -231,6 +243,8 @@ training = [
     noise_scale,
     mask_frac,
     sigma_time,
+    save_model,
+    load_best,
 ]
 
 # Network Settings
@@ -342,7 +356,7 @@ cond_dim = Requirement[int, int](
 )
 
 
-def valid_encode_dims(dims, _1: "CFG", _2: "CFG"):
+def valid_encode_dims(dims: list, _1: "CFG", _2: "CFG"):
     if len(dims) == 0:
         return (False, f"encode_dims: {dims} are empty")
     if any(dim <= 0 for dim in dims):
@@ -363,7 +377,7 @@ encode_dims = Requirement[list, list](
 )
 
 
-def valid_decode_dims(dims, _1: "CFG", params: "CFG"):
+def valid_decode_dims(dims: list, _1: "CFG", params: "CFG"):
     if len(dims) == 0:
         dims = params["ENCODE_DIMS"][::-1]
     if any(dim <= 0 for dim in dims):
