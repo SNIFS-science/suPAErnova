@@ -1,3 +1,6 @@
+# Copyright 2025 Patrick Armstrong
+"""Logging utilities for SuPAErnova."""
+
 from typing import TYPE_CHECKING
 import logging
 
@@ -8,32 +11,71 @@ if TYPE_CHECKING:
 
 
 def log(msg: str, level: int) -> None:
+    """Convenvience logging function.
+
+    Args:
+        msg (str): Message to log
+        level (int): Log level
+    """
     logger = logging.getLogger()
     logger.log(level, msg)
 
 
 def exception(msg: str) -> None:
+    """Convenvience exception function.
+
+    Args:
+        msg (str): Exception message
+    """
     logger = logging.getLogger()
-    logger.error(msg)
+    logger.exception(msg)  # noqa: LOG004
 
 
 def error(msg: str) -> None:
+    """Convenvience error logging function.
+
+    Args:
+        msg (str): Error message
+    """
     log(msg, logging.ERROR)
 
 
 def warning(msg: str) -> None:
+    """Convenvience warning logging function.
+
+    Args:
+        msg (str): Warning message
+    """
     log(msg, logging.WARNING)
 
 
 def info(msg: str) -> None:
+    """Convenvience info logging function.
+
+    Args:
+        msg (str): Info message
+    """
     log(msg, logging.INFO)
 
 
 def debug(msg: str) -> None:
+    """Convenvience debug logging function.
+
+    Args:
+        msg (str): Debug message
+    """
     log(msg, logging.DEBUG)
 
 
-def setup(verbose: bool, output: "Path") -> None:
+def setup(output: "Path", *, verbose: bool = False) -> None:
+    """Setup SuPAErnova logging.
+
+    Args:
+        output ("Path"): Directory to write supaernova.log to. This log file will contain debug message regardless of log level.
+
+    Kwargs:
+        verbose (bool): Increase log verbosity. Defaults to False
+    """
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 

@@ -39,9 +39,115 @@ def WMAE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     )
 
 
+def MSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    return tf.reduce_mean(
+        tf.reduce_sum(kwargs["mask"] * ((x - x_pred) ** 2.0), axis=(-2, -1)),
+    )
+
+
+def WMSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    return tf.reduce_mean(
+        tf.reduce_sum(
+            kwargs["mask"] * (((x - x_pred) / kwargs["sigma"]) ** 2.0),
+            axis=(-2, -1),
+        ),
+    )
+
+
+def RMSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    return tf.reduce_mean(
+        tf.reduce_sum(kwargs["mask"] * ((x - x_pred) ** 2.0), axis=(-2, -1))
+        / tf.reduce_sum(kwargs["mask"], axis=-2),
+    )
+
+
+def WRMSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    return tf.reduce_mean(
+        tf.sqrt(
+            tf.reduce_sum(
+                kwargs["mask"] * (((x - x_pred) / kwargs["sigma"]) ** 2.0),
+                axis=(-2, -1),
+            )
+            / tf.reduce_sum(kwargs["mask"], axis=-2),
+        ),
+    )
+
+
+def NGLL(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    return tf.reduce_mean(
+        tf.reduce_sum(
+            kwargs["mask"]
+            * (
+                0.5
+                * (
+                    tf.math.log(kwargs["mask"] * kwargs["sigma"] * kwargs["sigma"])
+                    + ((x - x_pred) / kwargs["sigma"]) ** 2.0
+                )
+            ),
+            axis=(-2, -1),
+        ),
+    )
+
+
+def HUBER(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    error = kwargs["mask"] * (x - x_pred)
+    cond = tf.math.abs(error) < kwargs["model"].clip_delta
+
+    squared_loss = 0.5 * error * error
+    linear_loss = kwargs["model"].clip_delta * (
+        tf.math.abs(error) - 0.5 * kwargs["model"].clip_delta
+    )
+
+    return tf.reduce_mean(
+        tf.reduce_sum(tf.where(cond, squared_loss, linear_loss), axis=(-2, -1)),
+    )
+
+
+def WHUBER(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    error = kwargs["mask"] * (x - x_pred) / kwargs["sigma"]
+    cond = tf.math.abs(error) < kwargs["model"].clip_delta
+
+    squared_loss = 0.5 * error * error
+    linear_loss = kwargs["model"].clip_delta * (
+        tf.math.abs(error) - 0.5 * kwargs["model"].clip_delta
+    )
+
+    return tf.reduce_mean(
+        tf.reduce_sum(tf.where(cond, squared_loss, linear_loss), axis=(-2, -1)),
+    )
+
+
+def MAGNITUDE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+    cond = x_pred >= 0.0
+
+    amp = tf.math.log(1e-10 + (x_pred / (kwargs["mask"] * x)))
+    mag_loss = kwargs["mask"] * tf.math.abs(amp)
+    mag_loss_amp = kwargs["mask"] * amp
+
+    nan_error = 0.5 * (kwargs["mask"] * ((x - x_pred) / kwargs["sigma"])) ** 2.0
+
+    loss = tf.reduce_mean(
+        tf.reduce_sum(tf.where(cond, mag_loss, nan_error), axis=(-2, -1)),
+    )
+
+    loss_amp = tf.reduce_mean(
+        tf.abs(tf.reduce_sum(tf.where(cond, mag_loss_amp, nan_error), axis=(-2, -1))),
+    )
+
+    return loss + loss_amp
+
+
 loss_functions = {
     "MAE": MAE,
     "WMAE": WMAE,
+    "MSE": MSE,
+    "WMSE": WMSE,
+    "RMSE": RMSE,
+    "WRMSE": WRMSE,
+    "NGLL": NGLL,
+    "HUBER": HUBER,
+    "WHUBER": WHUBER,
+    "MAGNITUDE": MAGNITUDE,
 }
 
 

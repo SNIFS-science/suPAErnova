@@ -1,3 +1,3 @@
 [submodule "suPAErnova_data"]
-	path = examples/suPAErnova_data
+	path = suPAErnova_data
 	url = git@github.com:OmegaLambda1998/suPAErnova_data.git

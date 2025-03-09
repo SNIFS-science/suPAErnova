@@ -86,10 +86,10 @@ class Data(Step):
 
         # Optional
         # SALT Setup
-        self.cosmo = cast("cosmo.FlatLambdaCDM", self.opts["COSMO"])
+        self.cosmo = cast("cosmo.FlatLambdaCDM", self.opts["COSMOLOGICAL_MODEL"])
         self.snmodel = cast(
             "sncosmo.SALT2Source | sncosmo.SALT3Source",
-            self.opts["SALT"],
+            self.opts["SALT_MODEL"],
         )
         self.log.debug(f"SALT model parameters are: {self.snmodel.param_names}")
 

@@ -1,3 +1,6 @@
+# Copyright 2025 Patrick Armstrong
+"""Step-specific analysis function."""
+
 from matplotlib import pyplot as plt
 
 from suPAErnova.analysis import (

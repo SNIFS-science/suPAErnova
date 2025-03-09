@@ -72,11 +72,15 @@ class Callback:
         self.callbacks: dict[str, dict[str, Callable[[Self], None]]] = {}
 
 
-S = TypeVar("S", bound=Callback)
+if TYPE_CHECKING:
+    S = TypeVar("S", bound=Callback)
+    R = TypeVar("R")
 
 
-def callback(fn: "Callable[[S], Any]"):
-    def wrapper(self: S):
+def callback(
+    fn: "Callable[[S], R]",
+) -> "Callable[[S], R]":
+    def wrapper(self: "S") -> "R":
         callbacks = self.callbacks.get(fn.__name__.upper(), {})
         pre_callback = callbacks.get("pre")
         if pre_callback is not None:

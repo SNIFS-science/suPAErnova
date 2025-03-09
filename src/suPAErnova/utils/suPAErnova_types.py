@@ -1,3 +1,6 @@
+# Copyright 2025 Patrick Armstrong
+"""Typing utilities for SuPAErnova."""
+
 from typing import Any
 from collections.abc import Iterable
 

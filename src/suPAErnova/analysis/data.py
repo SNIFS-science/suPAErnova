@@ -1,4 +1,7 @@
-from typing import TYPE_CHECKING, Literal
+# Copyright 2025 Patrick Armstrong
+"""Data step analysis functions."""
+
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import matplotlib as mpl
@@ -8,6 +11,7 @@ from matplotlib import (
 )
 
 if TYPE_CHECKING:
+    from typing import Literal
     from pathlib import Path
 
     from suPAErnova.steps import Data
@@ -49,12 +53,18 @@ def _plot_spectra(self: "Data", sn: pd.DataFrame, plotpath: "Path") -> None:
 
 def plot_spectra(
     self: "Data",
-    spectra_to_plot: str | list[str] | Literal[True],
+    spectra_to_plot: "str | list[str] | Literal[True]",
 ) -> None:
+    """Plot SN spectra.
+
+    Args:
+        self (Data): The Data step to plot
+        spectra_to_plot (str | list[str] | Literal[True]): Which spectra to plot:
+            spectra_to_plot (str): The name of a single spectrum to plot
+            spectra_to_plot (list[str]): Names of each spectrum to plot
+            spectra_to_plot (Literal[True]): Plot every spectrum
+    """
     self.log.info("Plotting Spectra")
-    if not isinstance(self.sne, pd.DataFrame):
-        self.log.error("Tried to plot without first loading SNe")
-        return
     sn_names = self.sne["sn"]
     if isinstance(spectra_to_plot, str):
         spectra_to_plot = [spectra_to_plot]
