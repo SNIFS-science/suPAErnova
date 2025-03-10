@@ -138,38 +138,17 @@ def run_analysis(cfg: "CFG") -> "RequirementReturn[None]":
     return success, result
 
 
-@click.command()
-@click.argument("config", type=click.Path(exists=True, path_type=Path))
-@click.option("-v", "--verbose", is_flag=True, type=bool, default=False)
-@click.option("-f", "--force", is_flag=True, type=bool, default=False)
-def cli(config: Path, *, verbose: bool, force: bool) -> "RequirementReturn[None]":
-    """Command line interface for SuPAErnova.
-
-    Args:
-        config (Path): Path to the config.toml containing your desired configuration
-
-    Kwargs:
-        verbose (bool): Increase log verbosity. Defaults to False
-        force (bool): Force every step to run, even if a previous result already exists
-
-    Returns:
-        RequirementReturn[None]
-    """
-    cfg = toml.load(config)
-    return main(cfg, verbose=verbose, force=force, basepath=config.parent)
-
-
-def main(
-    config: "CFG",
-    *,
+def setup_global_config(
+    cfg: "CFG",
+    *,  # Force keyword-only arguments
     verbose: bool = False,
     force: bool = False,
     basepath: Path | None = None,
-) -> "RequirementReturn[None]":
-    """Main SuPAErnova entry point, executing each of the steps defined in config.
+) -> "CFG":
+    """Setup global configurations used by all steps.
 
     Args:
-        config (CFG): Path to the config.toml containing your desired configuration
+        cfg (CFG): Path to the config.toml containing your desired configuration
 
     Kwargs:
         verbose (bool): Increase log verbosity. Defaults to False
@@ -179,8 +158,6 @@ def main(
     Returns:
         RequirementReturn[None]
     """
-    cfg: CFG = normalise_config(config)
-
     # Setup global config
     cfg["GLOBAL"] = cfg.get("GLOBAL", {})
 
@@ -213,8 +190,61 @@ def main(
     # Setup logging
     log.setup(outpath, verbose=verbose)
     cfg["GLOBAL"]["LOG"] = log
+    return cfg
 
-    # Determin what steps to run
+
+@click.command()
+@click.argument("config", type=click.Path(exists=True, path_type=Path))
+@click.option("-v", "--verbose", is_flag=True, type=bool, default=False)
+@click.option("-f", "--force", is_flag=True, type=bool, default=False)
+def cli(
+    config: Path,
+    *,  # Force keyword-only arguments
+    verbose: bool = False,
+    force: bool = False,
+) -> "RequirementReturn[None]":
+    """Command line interface for SuPAErnova.
+
+    Args:
+        config (Path): Path to the config.toml containing your desired configuration
+
+    Kwargs:
+        verbose (bool): Increase log verbosity. Defaults to False
+        force (bool): Force every step to run, even if a previous result already exists. Defaults to False
+
+    Returns:
+        RequirementReturn[None]
+    """
+    cfg = toml.load(config)
+    return main(cfg, verbose=verbose, force=force, basepath=config.parent)
+
+
+def main(
+    config: "CFG",
+    *,  # Force keyword-only arguments
+    verbose: bool = False,
+    force: bool = False,
+    basepath: Path | None = None,
+) -> "RequirementReturn[None]":
+    """Main SuPAErnova entry point, executing each of the steps defined in config.
+
+    Args:
+        config (CFG): Configuration dictionary which describes and controls each step
+
+    Kwargs:
+        verbose (bool): Increase log verbosity. Defaults to False
+        force (bool): Force every step to run, even if a previous result already exists. Defaults to False
+        basepath (Path): The directory from which all paths are assumed to be relative. Defaults to Path.cwd()
+
+    Returns:
+        RequirementReturn[None]
+    """
+    cfg: CFG = normalise_config(config)
+
+    # Setup global config
+    cfg = setup_global_config(cfg, verbose=verbose, force=force, basepath=basepath)
+
+    # Determine what steps to run
     steps = list(filter(lambda step: step != "GLOBAL", cfg.keys()))
 
     # Setup Steps

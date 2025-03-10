@@ -10,7 +10,7 @@ function run {
     # Don't immediately fill vram
     export TF_FORCE_GPU_ALLOW_GROWTH="true"
 
-    uv run --no-default-groups --group rocm suPAErnova "${1}"
+    uv run --no-default-groups --group rocm --with jupyter jupyter lab
 }
 
 run $@

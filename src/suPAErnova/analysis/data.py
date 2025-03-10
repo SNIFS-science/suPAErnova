@@ -19,9 +19,10 @@ if TYPE_CHECKING:
 
 def _plot_spectra(self: "Data", sn: pd.DataFrame, plotpath: "Path") -> None:
     name = sn["sn"].to_numpy()[0]
-    outpath = plotpath / f"{name}.svg"
-    if not self.force and outpath.exists():
-        self.log.debug(f"{name} plot already exists at {outpath}")
+    svg_outpath = plotpath / f"{name}.svg"
+    png_outpath = plotpath / f"{name}.png"
+    if not self.force and svg_outpath.exists() and png_outpath.exists():
+        self.log.debug(f"{name} plot already exists at {svg_outpath} / {png_outpath}")
         return
 
     spectra = pd.concat(sn["spectra"].tolist())
@@ -44,7 +45,8 @@ def _plot_spectra(self: "Data", sn: pd.DataFrame, plotpath: "Path") -> None:
     plt.ylabel("Normalized flux")
     plt.title(name)
 
-    plt.savefig(outpath)
+    plt.savefig(png_outpath)
+    plt.savefig(svg_outpath)
     # Clear plots from memory
     plt.cla()
     plt.clf()

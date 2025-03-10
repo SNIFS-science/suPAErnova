@@ -48,7 +48,7 @@
     conflicts = [[{group = "default"}, {group = "rocm"}]]
     default-groups = [
         "dev",
-        "rocm",
+        "default",
     ] # Change me to your preferred tensorflow version
 
     [[tool.uv.dependency-metadata]]

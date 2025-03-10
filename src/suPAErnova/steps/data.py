@@ -77,6 +77,42 @@ class Data(Step):
         self.test_data: list[CFG]
 
     @override
+    def __str__(self) -> str:
+        rtn = super().__str__()
+        if self.is_setup:
+            lines = [
+                f"    Data Path: {self.datapath}",
+                f"    SNe Path: {self.snepath}",
+                f"    Train Path: {self.trainpath}",
+                f"    Test Path: {self.testpath}",
+                f"    Meta Path: {self.metapath}",
+                f"    IDR Path: {self.idrpath}",
+                f"    Mask Path: {self.maskpath}",
+                f"    Cosmological Model: {self.cosmo}",
+                f"    SALT Model: {self.snmodel}",
+                f"    Min Phase: {self.min_phase}",
+                f"    Max Phase: {self.max_phase}",
+                f"    Training Fraction: {self.train_frac}",
+                f"    Testing Fraction: {self.test_frac}",
+                f"    Number of KFolds: {self.nkfold}",
+                f"    Seed: {self.seed}",
+            ]
+            rtn += "\n\n" + "\n".join(lines)
+        if self.has_run:
+            lines = [
+                f"    Number of SNe: {self.n_sn}",
+                f"    Number of wavelength elements: {self.n_wavelength}",
+                f"    Number of Spectra per SNe: {self.nspectra_per_sn}",
+                f"    Maximum number of Spectra per SNe: {self.n_timemax}",
+                f"    Minimum number of Spectra per SNe{self.n_timemin}",
+                f"    Data: {self.data}",
+                f"    Training Data: {self.train_data}",
+                f"    Testing Data: {self.test_data}",
+            ]
+            rtn += "\n\n" + "\n".join(lines)
+        return rtn
+
+    @override
     def _setup(self):
         # Load from config file
         # Required

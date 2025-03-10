@@ -8,7 +8,7 @@ Constructed in TensorFlow 2 and TensorFlow Probability.
 ![alt text](figures/network_illustration.png)
 
 ## Installation
-Install the package reqirements with conda
+Install the package requirements with conda
 
 `conda env create -f environment.yml`
 

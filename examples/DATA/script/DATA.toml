@@ -43,3 +43,27 @@
     # The seed used throughout data preperation, in particular for randomly splitting the data into training, testing, and validation bins.
     #   Defaults to 12345
     seed = 12345
+
+    # === Analysis Keys ===
+    [data.analysis]
+        # Which spectra to plot
+        #    str: The name of a single spectrum to plot
+        #    list[str]: Names of each spectrum to plot
+        #    true: Plot every spectrum
+        plot_spectra = true
+
+    # === Callbacks ===
+    [data.callbacks]
+        analyse                   = "callbacks/analyse.py"
+        calculate_laser_line_mask = "callbacks/calculate_laser_line_mask.py"
+        calculate_salt_flux       = "callbacks/calculate_salt_flux.py"
+        calculate_wavelength_mask = "callbacks/calculate_wavelength_mask.py"
+        finalise_data             = "callbacks/finalise_data.py"
+        get_dims                  = "callbacks/get_dims.py"
+        load_data                 = "callbacks/load_data.py"
+        result                    = "callbacks/result.py"
+        run                       = "callbacks/run.py"
+        setup                     = "callbacks/setup.py"
+        split_train_test          = "callbacks/split_train_test.py"
+        transform_data            = "callbacks/transform_data.py"
+        validate                  = "callbacks/validate.py"

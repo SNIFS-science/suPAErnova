@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Self, TypeVar
+from typing import TYPE_CHECKING, Any, Self, TypeVar, override
 from pathlib import Path
 import traceback
 from collections.abc import Callable
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from suPAErnova.config.requirements import REQ, RequirementReturn
-    from suPAErnova.utils.suPAErnova_types import CFG
+    from suPAErnova.utils.suPAErnova_types import CFG, CONFIG
 
 
 # === Optional Requirements ===
@@ -34,28 +34,40 @@ analysis = Requirement[dict, dict](
 )
 
 
-def get_callbacks(callbacks: dict, cfg: "CFG", _2: "CFG"):
+def get_callbacks(
+    callbacks: "CONFIG[str | CONFIG[Callable]]",
+    cfg: "CFG",
+    _2: "CFG",
+) -> "RequirementReturn[CONFIG[CONFIG[Callable]]]":
     rtn = {}
-    for fn, script in callbacks.items():
-        rtn[fn] = {}
-        path = Path(script)
-        if not path.is_absolute():
-            path = cfg["BASE"] / path
-        if not path.exists():
-            return False, f"{path} does not exist"
-        with path.open("r") as io:
-            script_code = io.read()
-        # Create an isolated namespace
-        local_scope = {}
-        exec(script_code, globals(), local_scope)
-        if "pre" in local_scope:
-            if not isinstance(local_scope["pre"], Callable):
-                return False, f"pre-{script} is not callable"
-            rtn[fn]["pre"] = local_scope["pre"]
-        if "post" in local_scope:
-            if not isinstance(local_scope["post"], Callable):
-                return False, f"post-{script} is not callable"
-            rtn[fn]["post"] = local_scope["post"]
+    for key, val in callbacks.items():
+        rtn[key] = {}
+        # Script-mode: key is function name, val is path to function callback script
+        if isinstance(val, str):
+            path = Path(val)
+            if not path.is_absolute():
+                path = cfg["BASE"] / path
+            if not path.exists():
+                return False, f"{path} does not exist"
+            with path.open("r") as io:
+                script_code = io.read()
+            # Create an isolated namespace
+            local_scope = {}
+            exec(script_code, globals(), local_scope)
+            if "pre" in local_scope:
+                if not isinstance(local_scope["pre"], Callable):
+                    return False, f"pre-{key} is not callable"
+                rtn[key]["pre"] = local_scope["pre"]
+            if "post" in local_scope:
+                if not isinstance(local_scope["post"], Callable):
+                    return False, f"post-{key} is not callable"
+                rtn[key]["post"] = local_scope["post"]
+        # Library-mode: key is function name, val is dictionary containing pre and post functions
+        else:
+            if "PRE" in val:
+                rtn[key]["pre"] = val["PRE"]
+            if "POST" in val:
+                rtn[key]["post"] = val["POST"]
     return True, rtn
 
 
@@ -69,7 +81,7 @@ callbacks = Requirement[dict, dict](
 
 class Callback:
     def __init__(self) -> None:
-        self.callbacks: dict[str, dict[str, Callable[[Self], None]]] = {}
+        self.callbacks: CONFIG[CONFIG[Callable[[Self], None]]] = {}
 
 
 if TYPE_CHECKING:
@@ -124,6 +136,7 @@ class Step(Callback):
         super().__init__()
         self.name: str = self.__class__.__name__.upper()
         self.is_setup: bool = False
+        self.has_run: bool = False
 
         self.orig_config: CFG = config
         self.global_cfg: CFG = config["GLOBAL"]
@@ -168,6 +181,17 @@ class Step(Callback):
         # Bind the callback function to self
         # raw_callbacks: Callable[[Self], None] = self.opts["CALLBACKS"]
         # self.callbacks: Callable[[Self], None] = MethodType(raw_callbacks, self)
+
+    @override
+    def __str__(self) -> str:
+        lines = [
+            f"{self.name}:",
+            f"    Is Setup: {self.is_setup}",
+            f"    Has Run: {self.has_run}",
+            f"    Global Config: {self.global_cfg}",
+            f"    {self.name} Options: {self.opts}",
+        ]
+        return "\n".join(lines)
 
     @callback
     def validate(self) -> bool:
@@ -261,6 +285,7 @@ class Step(Callback):
                 self.log.exception(f"Error loading {self.name}: {result}")
         if not ok:
             return ok, f"Error running {self.name}: {result}"
+        self.has_run = True
         return True, None
 
     @abstractmethod
