@@ -3,7 +3,7 @@
 
     # Path to directory containing data.
     #   Can be absolute or relative to the base path.
-    data_dir = "../../suPAErnova_data"
+    data_dir = "../../../suPAErnova_data/"
 
     # Metadata CSV containing SN names and SALT fit parameters.
     #   Can be absolute or relative to the data path.

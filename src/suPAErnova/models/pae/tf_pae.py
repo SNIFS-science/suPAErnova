@@ -131,6 +131,8 @@ class TF_PAEModel(ks.Model, PAEModel):
             kernel_regularizer=self.kernel_regulariser,
         )(x)
 
+        # Graph finished till here
+
         x = layers.Dense(
             self.latent_dim + self.num_physical_latent_dims,
             kernel_regularizer=self.kernel_regulariser,

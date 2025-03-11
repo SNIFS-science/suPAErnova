@@ -37,4 +37,14 @@ If you want to add additional functionality without needing to delve into the so
 
 Throughout the documentation, and the source code, the following naming conventions are used:
 
-
+- `step`: A distinct stage within the `SuPAErnova` pipeline. These include:
+    - [`DATA`](./DATA/README.md): Read in, parse, and transform data in preparation for later stages. This includes splitting the data into training and testing subsets.
+    - [`PAE`](./PAE/README.md): Build, train, and test a PAE model. There is no generic `PAE` step, instead you must choose one of the following `PAE` steps based on the NN backend you want to use:
+        - [`TF_PAE`](./PAE/TF_PAE/README.md): TensorFlow backend.
+        - [`TCH_PAE`](./PAE/TCH_PAE/README.md): Torch backend.
+    - [`NFLOW`](./NFLOW/README.md): Build, train, and test a normalising flow model. There is no generic `NFLOW` step, instead you must select one of the following `NFLOW` steps based on the NN backend you used for your PAE model:
+        - [`TF_NFLOW`](./NFLOW/TF_NFLOW/README.md): TensorFlow backend.
+        - [`TCH_NFLOW`](./NFLOW/TCH_NFLOW/README.md): Torch backend.
+    - [`PDF`](./PDF/README.md): Use an MCMC posterior estimation algorithm to quantify the uncertainty in best-fit latent parameters. There is no generic `PDF` step, instead you must choose one of the following `PDF` steps based on the NN backend you used in the previous steps:
+        - [`TF_PDF`](./PDF/TF_PDF/README.md): TensorFlow backend.
+        - [`TCH_PDF`](./PDF/TCH_PDF/README.md): Torch backend.
