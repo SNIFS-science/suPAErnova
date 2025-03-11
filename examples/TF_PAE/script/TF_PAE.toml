@@ -1,0 +1,20 @@
+[data]
+    # === Required Keys ===
+
+    # Path to directory containing data.
+    #   Can be absolute or relative to the base path.
+    data_dir = "../../suPAErnova_data"
+
+    # Metadata CSV containing SN names and SALT fit parameters.
+    #   Can be absolute or relative to the data path.
+    meta = "meta.csv"
+
+    # TXT file containing additional SALT fit parameters.
+    #   Can be absolute or relative to the data path.
+    idr = "IDR_eTmax.txt"
+
+    # TXT file containing a mask of bad spectra / wavelength ranges.
+    #   Can be absolute or relative to the data path.
+    mask = "mask_info_wmin_wmax.txt"
+
+[tf_pae]

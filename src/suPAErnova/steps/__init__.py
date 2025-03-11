@@ -134,7 +134,7 @@ class Step(Callback):
 
     def __init__(self, config: "CFG") -> None:
         super().__init__()
-        self.name: str = self.__class__.__name__.upper()
+        self.name: str = self.__class__.__name__.upper().replace("STEP", "")
         self.is_setup: bool = False
         self.has_run: bool = False
 
@@ -172,7 +172,7 @@ class Step(Callback):
 
         self.analyses: dict[str, Callable[[Self, CFG], None]] = getattr(
             analyses,
-            self.name,
+            self.name + "Analysis",
         ).ANALYSES
 
         self.callbacks: dict[str, dict[str, Callable[[Self], None]]] = self.opts[
@@ -343,8 +343,8 @@ class Step(Callback):
         return True, None
 
 
-from suPAErnova.steps.data import Data
-from suPAErnova.steps.model import ModelStep
-from suPAErnova.steps.tf_autoencoder import TF_AutoEncoder
+from suPAErnova.steps.pae import PAEStep
+from suPAErnova.steps.data import DATAStep
+from suPAErnova.steps.pae.tf_pae import TF_PAEStep
 
-__all__ = ["Data", "ModelStep", "Step", "TF_AutoEncoder"]
+__all__ = ["DATAStep", "PAEStep", "Step", "TF_PAEStep"]

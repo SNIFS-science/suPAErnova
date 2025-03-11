@@ -1,24 +1,24 @@
 from typing import TYPE_CHECKING, TypeVar, ClassVar, override
 
 from suPAErnova.steps import Step, callback
-from suPAErnova.models import models
-from suPAErnova.config.model import (
+from suPAErnova.config.pae import (
     prev,
     optional,
     required,
     optional_params,
     required_params,
 )
+from suPAErnova.models.pae import models
 
 if TYPE_CHECKING:
-    from suPAErnova.steps.data import Data
+    from suPAErnova.steps.data import DATAStep
     from suPAErnova.config.requirements import REQ
     from suPAErnova.utils.suPAErnova_types import CFG
 
     M = TypeVar("M")
 
 
-class ModelStep(Step):
+class PAEStep(Step):
     required = required
     optional = optional
     prev = prev
@@ -27,15 +27,15 @@ class ModelStep(Step):
 
     @classmethod
     def __update_params__(cls) -> None:
-        if cls is ModelStep:
+        if cls is PAEStep:
             return
         parent_cls = next(
             (
                 parent
                 for parent in cls.__bases__
-                if issubclass(parent, ModelStep) and parent is not ModelStep
+                if issubclass(parent, PAEStep) and parent is not PAEStep
             ),
-            ModelStep,
+            PAEStep,
         )
         # Create new lists instead of mutating to avoid side effects
         cls.required_params = parent_cls.required_params + cls.required_params
@@ -47,7 +47,7 @@ class ModelStep(Step):
 
     def __init__(self, cfg: "CFG") -> None:
         super().__init__(cfg)
-        self.data: Data = self.global_cfg["RESULTS"]["DATA"]
+        self.data: DATAStep = self.global_cfg["RESULTS"]["DATA"]
         self.params: CFG = self.opts["PARAMS"]
 
         is_valid = self.validate_params()
@@ -63,10 +63,10 @@ class ModelStep(Step):
         super()._setup()
         model_cls = self.opts["MODEL"]
         if model_cls is None:
-            name = self.__class__.__name__.upper()
-            model_cls = models.get(name)
+            model_name = self.name.upper()
+            model_cls = models.get(model_name)
             if model_cls is None:
-                return False, f"Unknown Model: {name}, must be one of {models}"
+                return False, f"Unknown Model: {model_name}, must be one of {models}"
         self.model_cls = model_cls
         return (True, None)
 

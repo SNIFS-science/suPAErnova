@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 @final
-class Data(Step):
+class DATAStep(Step):
     required = required
     optional = optional
 
@@ -64,7 +64,7 @@ class Data(Step):
         # Generate in self._run()
         # Lengths
         self.n_sn: int
-        self.nspectra_per_sn: npt.NDArray[np.int16]
+        self.nspectra_per_sn: npt.NDArray[np.int32]
         self.wavelength: pd.Series
         self.n_timemax: int
         self.n_timemin: int

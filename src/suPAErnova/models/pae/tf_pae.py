@@ -5,8 +5,8 @@ import tensorflow as tf
 from tensorflow import keras as ks
 from tensorflow.keras import layers
 
-from suPAErnova.models import PAEModel
-from suPAErnova.model_utils.tf_layers import (
+from suPAErnova.models.pae import PAEModel
+from suPAErnova.model_utils.pae.tf_pae.tf_layers import (
     relu,
     maximum,
     reduce_max,
@@ -15,18 +15,17 @@ from suPAErnova.model_utils.tf_layers import (
 )
 
 if TYPE_CHECKING:
-    from suPAErnova.steps.model import ModelStep
+    from suPAErnova.steps.pae import PAEStep
     from suPAErnova.utils.suPAErnova_types import CFG
 
 
 @final
-class TFAutoencoder(ks.Model, PAEModel):
-    def __init__(self, step: "ModelStep", training_params: "CFG") -> None:
+class TF_PAEModel(ks.Model, PAEModel):
+    def __init__(self, step: "PAEStep", training_params: "CFG") -> None:
         PAEModel.__init__(self, step, training_params)
         ks.Model.__init__(self)
 
         # Training Settings
-        print(self.training_params)
         self.training = self.training_params["training"]
         self.train_stage = self.training_params["train_stage"]
         self.learning_rate = self.training_params["learning_rate"]

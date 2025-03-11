@@ -14,10 +14,10 @@ if TYPE_CHECKING:
     from typing import Literal
     from pathlib import Path
 
-    from suPAErnova.steps import Data
+    from suPAErnova.steps import DATAStep
 
 
-def _plot_spectra(self: "Data", sn: pd.DataFrame, plotpath: "Path") -> None:
+def _plot_spectra(self: "DATAStep", sn: pd.DataFrame, plotpath: "Path") -> None:
     name = sn["sn"].to_numpy()[0]
     svg_outpath = plotpath / f"{name}.svg"
     png_outpath = plotpath / f"{name}.png"
@@ -54,7 +54,7 @@ def _plot_spectra(self: "Data", sn: pd.DataFrame, plotpath: "Path") -> None:
 
 
 def plot_spectra(
-    self: "Data",
+    self: "DATAStep",
     spectra_to_plot: "str | list[str] | Literal[True]",
 ) -> None:
     """Plot SN spectra.

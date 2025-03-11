@@ -1,4 +1,4 @@
 # Copyright 2025 Patrick Armstrong
-"""TF_Autoencoder step analysis functions."""
+"""TF_PAE step analysis functions."""
 
 ANALYSES = {}

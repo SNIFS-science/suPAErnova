@@ -4,10 +4,11 @@
 from matplotlib import pyplot as plt
 
 from suPAErnova.analysis import (
-    data as DATA,
-    tf_autoencoder as TF_AUTOENCODER,
+    pae as PAEAnalysis,
+    data as DATAAnalysis,
 )
+from suPAErnova.analysis.pae import tf_pae as TF_PAEAnalysis
 
 plt.set_loglevel("warning")
 
-__all__ = ["DATA", "TF_AUTOENCODER"]
+__all__ = ["DATAAnalysis", "PAEAnalysis", "TF_PAEAnalysis"]

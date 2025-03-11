@@ -1,6 +1,9 @@
+# Copyright 2025 Patrick Armstrong
+"""Generic Model configuration."""
+
 from typing import TYPE_CHECKING
 
-from suPAErnova.models import PAEModel, models
+from suPAErnova.models.pae import PAEModel, models
 from suPAErnova.config.requirements import Requirement
 
 if TYPE_CHECKING:
@@ -13,6 +16,14 @@ def get_model(
     _1: "CFG",
     _2: "CFG",
 ) -> "RequirementReturn[type[PAEModel] | None]":
+    """Select a model by name.
+
+    Args:
+        name (str): name of the model
+
+    Returns:
+        "RequirementReturn[type[PAEModel] | None]"
+    """
     if not name:
         return (True, None)
     model = models.get(name.upper())

@@ -11,7 +11,7 @@ import traceback
 import toml
 import click
 
-from suPAErnova.steps import Data, TF_AutoEncoder
+from suPAErnova.steps import DATAStep, TF_PAEStep
 from suPAErnova.utils import suPAErnova_logging as log
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 #
 
 
-STEPS: dict[str, type["Step"]] = {"DATA": Data, "TF_AUTOENCODER": TF_AutoEncoder}
+STEPS: dict[str, type["Step"]] = {"DATA": DATAStep, "TF_PAE": TF_PAEStep}
 
 
 #

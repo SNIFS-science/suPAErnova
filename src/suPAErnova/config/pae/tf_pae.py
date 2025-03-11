@@ -1,3 +1,6 @@
+# Copyright 2025 Patrick Armstrong
+"""TensorFlow Auto Encoder configuration."""
+
 from typing import TYPE_CHECKING, Literal
 from pathlib import Path
 import itertools
@@ -5,8 +8,45 @@ import itertools
 from suPAErnova.config.requirements import Requirement
 
 if TYPE_CHECKING:
-    from suPAErnova.config.requirements import REQ
+    from suPAErnova.config.requirements import REQ, RequirementReturn
     from suPAErnova.utils.suPAErnova_types import CFG
+
+#
+# === Model Setup Settings ===
+#
+
+
+def valid_colourlaw(
+    file: str,
+    cfg: "CFG",
+    _2: "CFG",
+) -> "RequirementReturn[Path | None]":
+    """If providing a colourlaw file, ensure the file exists.
+
+    Args:
+        file (str): Path to the colour law file
+        cfg (CFG): Global config
+
+    Returns:
+        RequirementReturn[Path | None]
+    """
+    if not file:
+        return (True, None)
+    path = Path(file)
+    if not path.is_absolute():
+        path = cfg["BASE"] / path
+    path = path.resolve()
+    if not path.exists():
+        return (False, f"{path} does not exist")
+    return (True, path)
+
+
+colourlaw = Requirement[str, Path | None](
+    name="colourlaw",
+    description="Path to a colourlaw file.\n    If provided, will be used as the initial kernel",
+    default="",
+    transform=valid_colourlaw,
+)
 
 
 # Data Settings
@@ -105,25 +145,6 @@ max_train_phase = Requirement[int, int](
     ),
 )
 
-
-def valid_colourlaw(file: str, cfg: "CFG", _2: "CFG"):
-    if not file:
-        return (True, None)
-    path = Path(file)
-    if not path.is_absolute():
-        path = cfg["BASE"] / path
-    path = path.resolve()
-    if not path.exists():
-        return (False, f"{path} does not exist")
-    return (True, path)
-
-
-colourlaw = Requirement[str, Path | None](
-    name="colourlaw",
-    description="Path to a colourlaw file",
-    default="",
-    transform=valid_colourlaw,
-)
 
 loss = Requirement[str, str](
     name="loss",

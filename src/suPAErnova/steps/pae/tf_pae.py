@@ -5,18 +5,19 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras as ks
 
-from suPAErnova.steps import ModelStep, callback
-from suPAErnova.model_utils import (
-    tf_losses as losses,
-    tf_optimisers as optimisers,
-    tf_schedulers as schedulers,
-)
-from suPAErnova.config.tf_autoencoder import (
+from suPAErnova.steps import callback
+from suPAErnova.steps.pae import PAEStep
+from suPAErnova.config.pae.tf_pae import (
     prev,
     optional,
     required,
     optional_params,
     required_params,
+)
+from suPAErnova.model_utils.pae.tf_pae import (
+    tf_losses as losses,
+    tf_optimisers as optimisers,
+    tf_schedulers as schedulers,
 )
 
 if TYPE_CHECKING:
@@ -25,12 +26,12 @@ if TYPE_CHECKING:
     from numpy import typing as npt
     from tensorflow.python.types.core import PolymorphicFunction
 
-    from suPAErnova.models.tf_autoencoder import TFAutoencoder
+    from suPAErnova.models.pae.tf_pae import TF_PAEModel
     from suPAErnova.utils.suPAErnova_types import CFG, CONFIG
 
 
 @final
-class TF_AutoEncoder(ModelStep):
+class TF_PAEStep(PAEStep):
     required = required
     optional = optional
     prev = prev
@@ -41,8 +42,8 @@ class TF_AutoEncoder(ModelStep):
         super().__init__(cfg)
 
         # Model
-        self.model_cls: type[TFAutoencoder]
-        self.model: TFAutoencoder
+        self.model_cls: type[TF_PAEModel]
+        self.model: TF_PAEModel
         self.training_params: CFG
         self.encoder: ks.Model
         self.decoder: ks.Model
@@ -307,7 +308,7 @@ class TF_AutoEncoder(ModelStep):
             tf.int32,
         )
 
-        n_sn, n_spectra, n_flux = train_shape
+        n_sn, _n_spectra, n_flux = train_shape
         n_batches = n_sn // self.batch_size
 
         dflux = tf.zeros(train_shape)
@@ -558,7 +559,7 @@ class TF_AutoEncoder(ModelStep):
             self.epoch = epoch
             is_best = False
             start_time = time.time()
-            train_loss, train_loss_terms, batch = train_step()
+            _train_loss, train_loss_terms, batch = train_step()
 
             # Get average loss over batches
             train_losses[epoch, 0] = epoch
@@ -573,7 +574,7 @@ class TF_AutoEncoder(ModelStep):
                 validation_losses[iteration, 0] = epoch
                 validation_losses[iteration, 1:] = validation_loss_terms
 
-                test_loss, test_loss_terms = test_step()
+                _test_loss, test_loss_terms = test_step()
                 test_losses[iteration, 0] = epoch
                 test_losses[iteration, 1:] = test_loss_terms
 
