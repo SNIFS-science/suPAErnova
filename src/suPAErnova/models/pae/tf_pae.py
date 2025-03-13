@@ -56,11 +56,11 @@ class TF_PAEModel(ks.Model, PAEModel):
         self.physical_latent = self.params["PHYSICAL_LATENT"]
 
         # Model Dimensions
-        self.n_spectra = int(self.data.n_timemax)
-        self.n_flux = self.data.n_wavelength
+        self.phase_dim = int(self.data.n_timemax)
+        self.wl_dim = self.data.n_wavelength
         self.cond_dim = self.params["COND_DIM"]
-        self.encode_dims = [*self.params["ENCODE_DIMS"], self.n_spectra]
-        self.decode_dims = [self.n_spectra, *self.params["DECODE_DIMS"]]
+        self.encode_dims = [*self.params["ENCODE_DIMS"], self.phase_dim]
+        self.decode_dims = [self.phase_dim, *self.params["DECODE_DIMS"]]
         self.latent_dim = self.params["LATENT_DIM"]
         self.num_physical_latent_dims = 3  # [delta t, delta m, Av]
 
@@ -69,24 +69,26 @@ class TF_PAEModel(ks.Model, PAEModel):
 
     def build_encoder(self):
         # Input layers
-
-        # Input spectra from a single supernovae
-        inputs_flux = layers.Input(
-            shape=(self.n_spectra, self.n_flux),
+        input_amp = layers.Input(
+            shape=(self.phase_dim, self.wl_dim),
             dtype=tf.float32,
+            name="Amplitude",
         )
-        # Phase-based conditional layer
-        inputs_time = layers.Input(
-            shape=(self.n_spectra, self.cond_dim),
+        input_phase = layers.Input(
+            shape=(self.phase_dim, self.cond_dim),
             dtype=tf.float32,
+            name="Phase",
         )
-        # Mask input layer
-        inputs_mask = layers.Input(shape=(self.n_spectra, self.n_flux), dtype=tf.int32)
+        input_mask = layers.Input(
+            shape=(self.phase_dim, self.wl_dim),
+            dtype=tf.int32,
+            name="Mask",
+        )
 
         if self.layer_type == "DENSE":
-            x = layers.concatenate([inputs_flux, inputs_time])
+            x = layers.concatenate([input_amp, input_phase])
         else:
-            x = inputs_flux
+            x = input_amp
 
         for i, n in enumerate(self.encode_dims[:-1]):
             if self.layer_type == "DENSE":
@@ -94,6 +96,7 @@ class TF_PAEModel(ks.Model, PAEModel):
                     n,
                     activation=self.activation,
                     kernel_regularizer=self.kernel_regulariser,
+                    name=f"Latent_{i + 1}",
                 )(x)
             else:
                 if i == 0:
@@ -105,7 +108,7 @@ class TF_PAEModel(ks.Model, PAEModel):
                     activation=self.activation,
                     kernel_regularizer=self.kernel_regulariser,
                     padding="same",
-                    input_shape=(self.n_spectra, self.n_flux) if i == 0 else None,
+                    input_shape=(self.phase_dim, self.wl_dim) if i == 0 else None,
                 )(x)
 
             if self.dropout > 0:
@@ -123,7 +126,7 @@ class TF_PAEModel(ks.Model, PAEModel):
                 self.x_shape[-3],
                 self.x_shape[-2] * self.x_shape[-1],
             ))(x)
-            x = layers.concatenate([x, inputs_time])
+            x = layers.concatenate([x, input_phase])
 
         x = layers.Dense(
             self.encode_dims[-1],
@@ -131,15 +134,13 @@ class TF_PAEModel(ks.Model, PAEModel):
             kernel_regularizer=self.kernel_regulariser,
         )(x)
 
-        # Graph finished till here
-
         x = layers.Dense(
             self.latent_dim + self.num_physical_latent_dims,
             kernel_regularizer=self.kernel_regulariser,
             use_bias=False,
         )(x)
 
-        is_kept = reduce_min(inputs_mask, axis=-1, keepdims=True)
+        is_kept = reduce_min(input_mask, axis=-1, keepdims=True, name="IsKept")
         outputs = reduce_sum(x * is_kept, axis=-2) / maximum(
             reduce_sum(is_kept, axis=-2),
             y=1,
@@ -147,9 +148,13 @@ class TF_PAEModel(ks.Model, PAEModel):
 
         if self.physical_latent:
             dtime = outputs[..., 0:1]
+            dtime.name = "DeltaPhase"
             amplitude = outputs[..., 1:2]
+            amplitude.name = "DeltaAmp"
             colour = outputs[..., 2:3]
+            colour.name = "DeltaAv"
             latent = outputs[..., 3:]
+            latent.name = "Latents"
 
             #
             # Set the parameters you're not training to 0
@@ -157,9 +162,9 @@ class TF_PAEModel(ks.Model, PAEModel):
 
             # Initial training, only train colour
             if self.train_stage == 0:
-                latent *= 0.0
-                amplitude *= 0.0
                 dtime *= 0.0
+                amplitude *= 0.0
+                latent *= 0.0
 
             # Latent training, train the first `train_stage` latent parameters, and colour
             if 0 < self.train_stage <= self.latent_dim:
@@ -186,6 +191,7 @@ class TF_PAEModel(ks.Model, PAEModel):
 
                 batch_mean_dtime = reduce_sum(dtime * is_kept, axis=0) / reduced_is_kept
                 dtime = layers.subtract([dtime, batch_mean_dtime])
+                print(batch_mean_dtime.shape)
 
                 batch_mean_amplitude = (
                     reduce_sum(amplitude * is_kept, axis=0) / reduced_is_kept
@@ -196,14 +202,13 @@ class TF_PAEModel(ks.Model, PAEModel):
                     reduce_sum(colour * is_kept, axis=0) / reduced_is_kept
                 )
                 colour = layers.subtract([colour, batch_mean_colour])
-
             else:
                 dtime -= self.moving_means[0]
                 amplitude -= self.moving_means[1]
                 colour -= self.moving_means[2]
             outputs = layers.concatenate([dtime, amplitude, colour, latent])
 
-        inputs = [inputs_flux, inputs_time, inputs_mask]
+        inputs = [input_amp, input_phase, input_mask]
 
         return ks.Model(inputs=inputs, outputs=outputs)
 
@@ -213,13 +218,13 @@ class TF_PAEModel(ks.Model, PAEModel):
             name="latent_params",
         )
         inputs_time = layers.Input(
-            shape=(self.n_spectra, self.cond_dim),
+            shape=(self.phase_dim, self.cond_dim),
             name="conditional_params",
         )
-        inputs_mask = layers.Input(shape=(self.n_spectra, self.n_flux))
+        inputs_mask = layers.Input(shape=(self.phase_dim, self.wl_dim))
 
         # Repeate latent vector to match number of data timesteps
-        latent = layers.RepeatVector(self.n_spectra)(inputs_latent)
+        latent = layers.RepeatVector(self.phase_dim)(inputs_latent)
 
         # Set up physical latent space (if desired)
         if self.physical_latent:
@@ -256,7 +261,7 @@ class TF_PAEModel(ks.Model, PAEModel):
                         kernel_regularizer=self.kernel_regulariser,
                     )(x)
                     x = layers.Reshape((
-                        self.n_spectra,
+                        self.phase_dim,
                         self.x_shape[-2],
                         self.x_shape[-1],
                     ))(x)
@@ -273,15 +278,15 @@ class TF_PAEModel(ks.Model, PAEModel):
 
         if self.layer_type == "DENSE":
             outputs = layers.Dense(
-                self.n_flux,
+                self.wl_dim,
                 kernel_regularizer=self.kernel_regulariser,
             )(x)
         else:
-            outputs = layers.Reshape((self.n_spectra, x.shape[-2] * x.shape[-1]))(x)
+            outputs = layers.Reshape((self.phase_dim, x.shape[-2] * x.shape[-1]))(x)
 
         if self.physical_latent:
             colourlaw = layers.Dense(
-                self.n_flux,
+                self.wl_dim,
                 kernel_initializer=None
                 if self.colourlaw is None
                 else tf.constant_initializer(self.colourlaw),
