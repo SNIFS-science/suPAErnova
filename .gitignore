@@ -1,6 +1,9 @@
 # Example output
 /examples/**/output/
 
+# Old source code
+/src/old_suPAErnova/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

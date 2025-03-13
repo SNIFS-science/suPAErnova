@@ -1,6 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 """Logging utilities for SuPAErnova."""
 
+import sys
 from typing import TYPE_CHECKING
 import logging
 
@@ -97,7 +98,7 @@ def setup(output: "Path", *, verbose: bool = False) -> None:
     )
     logger.addHandler(file_handler)
 
-    stream_handler = logging.StreamHandler()
+    stream_handler = logging.StreamHandler(stream=sys.stdout)
     stream_handler.setLevel(level)
     stream_handler.setFormatter(
         coloredlogs.ColoredFormatter(fmt, level_styles=level_styles),
