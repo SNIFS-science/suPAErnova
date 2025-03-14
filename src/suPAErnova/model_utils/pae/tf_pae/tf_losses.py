@@ -8,17 +8,8 @@ if TYPE_CHECKING:
 
     from suPAErnova.models.tf_autoencoder import TFAutoencoder
 
-# TODO: Choices
-# choice=[
-#     "MSE",
-#     "WMSE",
-#     "RMSE",
-#     "WRMSE",
-#     "NGLL",
-#     "HUBER",
-#     "WHUBER",
-#     "MAGNITUDE",
-# ],
+
+# TODO: Make modular
 
 
 def MAE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):

@@ -228,7 +228,9 @@ class Step(Callback):
             self.opts[key] = result
         return True
 
-    def tqdm(self, lst: "Iterable[Any]", *args, **kwargs):
+    def tqdm(
+        self, lst: "Iterable[Any]", *args, **kwargs,
+    ):  # TODO: Allow custom text to be passed to stop prints / logs overwriting bar.
         return lst if not self.global_cfg["VERBOSE"] else tqdm(lst, *args, **kwargs)
 
     @abstractmethod

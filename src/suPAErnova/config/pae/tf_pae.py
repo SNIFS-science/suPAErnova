@@ -313,7 +313,7 @@ optimiser = Requirement[str, str](
     name="optimiser",
     description="Which optimiser to use",
     default="ADAMW",
-    choice=["ADAM", "ADAMW"],
+    choice=["ADAM", "ADAMW", "SGD"],
 )
 scheduler = Requirement[str, str](
     name="scheduler",
@@ -366,16 +366,6 @@ network_settings = [
     physical_latent,
 ]
 
-# Data Dimensions
-cond_dim = Requirement[int, int](
-    name="cond_dim",
-    description="Dimension of conditional layer",
-    default=1,
-    transform=lambda dim, _1, _2: (True, dim)
-    if dim > 0
-    else (False, f"cond_dim: {dim} is not strictly positive"),
-)
-
 
 def valid_encode_dims(dims: list, _1: "CFG", _2: "CFG"):
     if len(dims) == 0:
@@ -424,7 +414,7 @@ latent_dim = Requirement[int, int](
     default=3,
 )
 
-dimensions = [cond_dim, encode_dims, decode_dims, latent_dim]
+dimensions = [encode_dims, decode_dims, latent_dim]
 
 required: list["REQ"] = []
 optional: list["REQ"] = []

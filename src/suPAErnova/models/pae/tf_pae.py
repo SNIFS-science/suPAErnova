@@ -43,7 +43,7 @@ class TF_PAEModel(ks.Model, PAEModel):
 
         # Network Settings
         self.layer_type = self.params["LAYER_TYPE"].upper()
-        self.activation = self.params["ACTIVATION"]
+        self.activation = self.params["ACTIVATION"]  # TODO: Make modular
 
         if self.params["KERNEL_REGULARISER"] > 0:
             self.kernel_regulariser = ks.regularizers.l2(
@@ -58,7 +58,7 @@ class TF_PAEModel(ks.Model, PAEModel):
         # Model Dimensions
         self.phase_dim = int(self.data.n_timemax)
         self.wl_dim = self.data.n_wavelength
-        self.cond_dim = self.params["COND_DIM"]
+        self.cond_dim = 1
         self.encode_dims = [*self.params["ENCODE_DIMS"], self.phase_dim]
         self.decode_dims = [self.phase_dim, *self.params["DECODE_DIMS"]]
         self.latent_dim = self.params["LATENT_DIM"]

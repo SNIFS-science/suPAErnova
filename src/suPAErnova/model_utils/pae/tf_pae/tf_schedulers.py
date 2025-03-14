@@ -1,5 +1,7 @@
 import keras as ks
 
+# TODO: Make modular
+
 scheduler = {
     "": lambda lr, _: lr,
     "EXPONENTIAL": lambda lr, kwargs: ks.optimizers.schedules.ExponentialDecay(

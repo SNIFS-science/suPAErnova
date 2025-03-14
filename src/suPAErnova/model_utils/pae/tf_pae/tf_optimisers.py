@@ -2,6 +2,8 @@ from typing import Any
 
 import keras as ks
 
+# TODO: Make modular
+
 
 def adam(lr: ks.optimizers.schedules.LearningRateSchedule | float, _: dict[str, Any]):
     return ks.optimizers.Adam(learning_rate=lr)

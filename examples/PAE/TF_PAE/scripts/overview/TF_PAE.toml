@@ -17,4 +17,81 @@
     #   Can be absolute or relative to the data path.
     mask = "mask_info_wmin_wmax.txt"
 
-[tf_pae]
+[tf_pae] # TODO: Reorder / Reformat / Rename these keys to make it easy to handle
+
+    # Whether to use the ["DENSE"](https://www.tensorflow.org/api_docs/python/tf/keras/layers/Dense) or ["CONVOLUTIONAL"](https://www.tensorflow.org/api_docs/python/tf/keras/layers/Conv2D) model architecture.
+    #   Defaults to "DENSE"
+    layer_type = "DENSE"
+
+    # Which activation function to use. Possible values include:
+    #   - "elu": Use an [Exponential Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/elu) activation function
+    #   - "gelu": Use a [Gaussian Error Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/gelu) activation function
+    #   - "relu": Use a [REctified Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/relu) activation function
+    #   - "swish": Use a [Swish / Silu](https://www.tensorflow.org/api_docs/python/tf/keras/activations/silu) activation function
+    #   - "tanh": Use a [Hyperbolic Tangent](https://www.tensorflow.org/api_docs/python/tf/keras/activations/tanh) activation function
+    #   Defaults to "relu"
+    activation = "relu"
+
+    # What learning rate to use for training
+    #   Defaults to 0.005
+    lr = 0.005
+
+    # What learning rate to use when training the final model, which required training all parameters simultaneously.
+    #   Default to 0.001
+    lr_deltat = 0.001
+
+    # Which optimiser to use. Possible values include:
+    #   - "ADAM": Use an [Adam](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/Adam) optimiser.
+    #   - "ADAMW": Use a [Weighted Adam](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/AdamW) optimiser.
+    #   - "SGD": Use a [Gradient Descent with Momentum](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/SGD) optimiser.
+    #   Defaults to "ADAMW"
+    optimiser = "ADAMW"
+
+    # Rate of weight decay to use in your chosen optimiser
+    #   Default to 0.00001
+    weight_decay_rate = 0.00001
+
+    # Which scheduler to use. Possible values include:
+    #   - "EXPONENTIAL": Use an [Exponential Decay](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/schedules/ExponentialDecay) scheduler.
+    #   - "": Use an Identity scheduler, which just returns the provided learning rate.
+    #   Defaults to "EXPONENTIAL"
+    scheduler = "EXPONENTIAL"
+
+    # Rate of learning rate decay to use in your chosen scheduler
+    #   Defaults to 0.95
+    lr_decay_rate = 0.95
+
+    # Number of learning rate decay steps to use in your chosen scheduler
+    #   Defaults to 300
+    lr_decay_steps = 300
+
+    # [L2 Regularisation](https://www.tensorflow.org/api_docs/python/tf/keras/regularizers/L2)  penalty to apply during training, or 0.0 for no penalty.
+    #   Defaults to 0.0
+    kernel_regulariser = 0.0
+
+    # Whether to include a [Dropout Layer](https://www.tensorflow.org/api_docs/python/tf/keras/layers/Dropout) to the encoder, with a rate of `dropout`. Setting this to 0.0 disables the Dropout Layer.
+    #   Defaults to 0.0
+    dropout = 0.0
+
+    # Whether to include a [Batch Normalisation Layer](https://www.tensorflow.org/api_docs/python/tf/keras/layers/BatchNormalization) to the encoder.
+    #   Defaults to false
+    batchnorm = false
+
+    # Whether to include physical latent parameters.
+    #   Defaults to true, which corresponds to three physical latent parameters:
+    #     - Δ𝓅: Different in time of peak brightness relative to the SALT fits (labelled as `phase` throughout the source code)
+    #     - Δℳ : Magnitude residual (labeled as `amplitude` or `amp` throughout the source code)
+    #     - ΔAᵥ: Relative extrinsic extinction (labeled as `AV` throughout the source code)
+    physical_latent = true
+
+    # Dimensions of each dense layer in the encoder.
+    #   Default to [256, 128]
+    encode_dims = [256, 128]
+
+    # Dimensions of each dense layer in the decoder.
+    #   Defaults to the reverse of encode_dims
+    decode_dims = []
+
+    # The number of non-physical latent dimensions to encode.
+    #   Defaults to 3
+    latent_dim = 3
