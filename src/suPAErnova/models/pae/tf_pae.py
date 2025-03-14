@@ -191,7 +191,6 @@ class TF_PAEModel(ks.Model, PAEModel):
 
                 batch_mean_dtime = reduce_sum(dtime * is_kept, axis=0) / reduced_is_kept
                 dtime = layers.subtract([dtime, batch_mean_dtime])
-                print(batch_mean_dtime.shape)
 
                 batch_mean_amplitude = (
                     reduce_sum(amplitude * is_kept, axis=0) / reduced_is_kept

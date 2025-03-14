@@ -7,9 +7,11 @@ SuPAErnova provides tools to read in SN spectral data, train a PAE, and use the 
 from typing import TYPE_CHECKING, cast
 from pathlib import Path
 import traceback
+import contextlib
 
 import toml
 import click
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from suPAErnova.steps import DATAStep, TF_PAEStep
 from suPAErnova.utils import suPAErnova_logging as log
@@ -243,29 +245,30 @@ def main(
 
     # Setup global config
     cfg = setup_global_config(cfg, verbose=verbose, force=force, basepath=basepath)
+    cm = logging_redirect_tqdm() if verbose else contextlib.nullcontext()
+    with cm:
+        # Determine what steps to run
+        steps = list(filter(lambda step: step != "GLOBAL", cfg.keys()))
 
-    # Determine what steps to run
-    steps = list(filter(lambda step: step != "GLOBAL", cfg.keys()))
+        # Setup Steps
+        success, result = setup_steps(cfg, steps)
+        if success:
+            cfg = cast("CFG", result)
 
-    # Setup Steps
-    success, result = setup_steps(cfg, steps)
-    if success:
-        cfg = cast("CFG", result)
+            # Run Steps
+            success, result = run_steps(cfg)
 
-        # Run Steps
-        success, result = run_steps(cfg)
+        if success:
+            cfg = cast("CFG", result)
 
-    if success:
-        cfg = cast("CFG", result)
+            # Run analysis
+            success, result = run_analysis(cfg)
 
-        # Run analysis
-        success, result = run_analysis(cfg)
-
-    if not success:
-        result = cast("str", result)
-        log.error(result)
-        return False, result
-    return True, None
+        if not success:
+            result = cast("str", result)
+            log.error(result)
+            return False, result
+        return True, None
 
 
 if __name__ == "__main__":

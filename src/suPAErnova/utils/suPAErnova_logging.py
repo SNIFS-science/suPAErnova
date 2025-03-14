@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 import logging
 
 import coloredlogs
-from tqdm.contrib.logging import logging_redirect_tqdm
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,8 +19,7 @@ def log(msg: str, level: int) -> None:
         level (int): Log level
     """
     logger = logging.getLogger()
-    with logging_redirect_tqdm():
-        logger.log(level, msg)
+    logger.log(level, msg)
 
 
 def exception(msg: str) -> None:
