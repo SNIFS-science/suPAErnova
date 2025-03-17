@@ -18,6 +18,132 @@
     mask = "mask_info_wmin_wmax.txt"
 
 [tf_pae] # TODO: Reorder / Reformat / Rename these keys to make it easy to handle
+    # Path to a colourlaw file. If provided, will be used as the kernel initialiser in the decoder.
+    #   Defaults to "" (i.e. no colourlaw file)
+    colourlaw = ""
+
+    # Which kfold (or kfolds if passing a list) to use
+    #   Defaults to 0
+    kfold = 0
+
+    # What fraction of training data to split into validation data. Set to 0.0 to use test data as validation data.
+    #   Defaults to 0.0
+    validation_frac = 0.0
+
+    # Number of epochs to use when training ΔAᵥ
+    #   Defaults to 1000
+    epochs_colour = 1000
+
+    # Number of epochs to use when training ΔAᵥ and any number of non-physical latent parameters
+    #   Defaults to 1000
+    epochs_latent = 1000
+
+    # Number of epoch to use when training ΔAᵥ all non-physical latent parameters, and Δℳ
+    #   Defaults to 1000
+    epochs_amplitude = 1000
+
+    # Number of epoch to use when training ΔAᵥ all non-physical latent parameters, Δℳ, and Δ𝓅 (i.e. all parameters)
+    #   Defaults to 5000
+    epochs_all = 5000
+
+    # Split training into several stages (true), or train all parameters at once (false).
+    #   When splitting, the result of the previous stage will be used as the starting point for the next stage.
+    #   When splitting, the following stages are run:
+    #   If physical_latent:
+    #       Stage 0: Train ΔAᵥ
+    #   If latent_dim > 0:
+    #       Stage latent_dim - (latent_dim - 1): Train ΔAᵥ and the first non-physical latent parameter
+    #       Stage latent_dim - (latent_dim - 2): Train ΔAᵥ and the first two non-physical latent parameters
+    #       ...
+    #       Stage latent_dim: Train ΔAᵥ and all non-physical latent parameters
+    #   If physical_latent:
+    #       Stage latent_dim + 1: Train ΔAᵥ, all non-physical latent parameters, and Δℳ
+    #       Stage latent_dim + 2: Train ΔAᵥ, all non-physical latent parameters, Δℳ, and Δ𝓅
+    #   Defaults to true
+    split_training = true
+
+    # Minimum redshift for spectral data.
+    #   Defaults to 0.02
+    min_train_redshift = 0.02
+
+    # Maximum redshift for spectral data.
+    #   Defaults to 1.0
+    max_train_redshift = 1.0
+
+    # Minimum phase for spectral data, relative to peak. Spectral data earlier than this phase will be cut. Defaults to -10
+    min_train_phase = -10
+
+    # Maximum phase for spectral data, relative to peak. Spectral data later than this phase will be cut.
+    #   Defaults to 40
+    max_train_phase = 40
+
+    # Loss function to use during training. Possible values include:
+    #   - "MAE": [Mean Absolute Error](https://www.tensorflow.org/api_docs/python/tf/keras/losses/MeanAbsoluteError)
+    #   - "WMAE": Weighted [Mean Absolute Error](https://www.tensorflow.org/api_docs/python/tf/keras/losses/MeanAbsoluteError)
+    #   - "MSE": [Mean Squared Error](https://www.tensorflow.org/api_docs/python/tf/keras/losses/MeanSquaredError)
+    #   - "WMSE": Weighted [Mean Squared Error](https://www.tensorflow.org/api_docs/python/tf/keras/losses/MeanSquaredError)
+    #   - "RMSE": Root [Mean Squared Error](https://www.tensorflow.org/api_docs/python/tf/keras/losses/MeanSquaredError)
+    #   - "WRMSE": Weighted Root [Mean Squared Error](https://www.tensorflow.org/api_docs/python/tf/keras/losses/MeanSquaredError)
+    #   - "NGLL": Negative Gaussian Log Likelihood
+    #   - "HUBER": [Huber](https://www.tensorflow.org/api_docs/python/tf/keras/losses/Huber)
+    #   - "WHUBER": Weighted [Huber](https://www.tensorflow.org/api_docs/python/tf/keras/losses/Huber)
+    #   - "MAGNITUDE": Custom loss function comparing spectral magnitudes
+    #   - "NULL": Custom loss function which returns 0 no matter what. Designed for use with custom user-defined loss functions, integrated through callbacks.
+    #   Defaults to WMAE
+    loss = "WMAE"
+
+    # Scaling factor which punishes the overall difference between real spectra and their corresponding encode-decode spectra.
+    #   Defaults to 500.0
+    loss_amplitude_offset = 500.0
+
+    # Scaling factor which encourages median Δ𝓅 close to 1
+    #   Defaults to 1000.0
+    loss_amplitude_parameter = 1000.0
+
+    # Scaling factor applied to the covariant loss between physical model parameters
+    #   Defaults to 50000.0
+    loss_covariance = 50000.0
+
+    # Ignore correlations with dust (i.e. colour)
+    #   TODO: Better explanation
+    #   Defaults to true
+    decorrelate_dust = true
+
+    # Ignore correlations
+    #   TODO: Better explanation
+    #   Defaults to true
+    decorrelate_all = true
+
+    # Set the size of each batch the data will be randomly split between.
+    #   Must evenly split the data.
+    #   TODO: Replace batch_size with num_batches which will then split the data as evenly as possible between that many batches. Should result in a better user experience
+    #   Defaults to 57, the size of the batches used in the original SuPAErnova examples
+    batch_size = 57
+
+    # Controls the scale of random offsets applied to the training data's amplitude parameter.
+    #   Will apply a gaussian offset with width determined by the observational uncertainty, scaled by `noise_scale`.
+    #   Thus a noise_scale of 0.0 will not apply any offset.
+    #   Defaults to 1.0
+    noise_scale = 1.0
+
+    # The fraction of spectra to randomly mask throughout training.
+    #   Defaults to 0.1
+    mask_frac = 0.1
+
+    # Controls the scale of random offsets applied to the training data's phase parameter.
+    #   If sigma_time is a positive value (`n`), apply a gaussian offset with constant width `n / 50`.
+    #   If sigma_time is 0, apply a gaussian offset with width determined by SALT constraints (`dphase / 50`).
+    #   If sigma_time is -1, no offset will be applied.
+    #   Defaults to 0.3
+    sigma_time = 0.3
+
+    # Whether to save intermediate models during training.
+    #   Defaults to true
+    save_model = true
+
+    # In between training stages, load the best model of the previous stage (if true), or the final epoch of the previous stage (if false).
+    #   Defaults to false
+    load_best = false
 
     # Whether to use the ["DENSE"](https://www.tensorflow.org/api_docs/python/tf/keras/layers/Dense) or ["CONVOLUTIONAL"](https://www.tensorflow.org/api_docs/python/tf/keras/layers/Conv2D) model architecture.
     #   Defaults to "DENSE"
@@ -88,8 +214,8 @@
     #   Default to [256, 128]
     encode_dims = [256, 128]
 
-    # Dimensions of each dense layer in the decoder.
-    #   Defaults to the reverse of encode_dims
+    # Dimensions of each dense layer in the decoder. If an empty list is passed, the reverse of encode_dims will be used.
+    #   Defaults to []
     decode_dims = []
 
     # The number of non-physical latent dimensions to encode.

@@ -145,7 +145,7 @@ max_train_phase = Requirement[int, int](
     ),
 )
 
-
+# TODO: Add proxy loss function for use in custom callback functions
 loss = Requirement[str, str](
     name="loss",
     description="Loss function",
