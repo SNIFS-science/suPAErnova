@@ -4,15 +4,19 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from tensorflow import keras as ks
 
-    from suPAErnova.models.tf_autoencoder import TFAutoencoder
+    from suPAErnova.models.pae.tf_pae import TF_PAEModel
+    from suPAErnova.utils.suPAErnova_types import CONFIG
 
 
-# TODO: Make modular
+def null(_x: "tf.Tensor", _x_pred: "tf.Tensor", _kwargs: "CONFIG[tf.Tensor]") -> None:
+    return None
 
 
-def MAE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def mae(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: "CONFIG[tf.Tensor]") -> tf.Tensor:
     return tf.reduce_sum(
         tf.reduce_sum(
             kwargs["mask"] * tf.abs(x - x_pred),
@@ -21,7 +25,7 @@ def MAE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     )
 
 
-def WMAE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def wmae(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: "CONFIG[tf.Tensor]") -> tf.Tensor:
     return tf.reduce_sum(
         tf.reduce_sum(
             kwargs["mask"] * tf.abs((x - x_pred) / kwargs["sigma"]),
@@ -30,13 +34,13 @@ def WMAE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     )
 
 
-def MSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def mse(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: "CONFIG[tf.Tensor]") -> tf.Tensor:
     return tf.reduce_mean(
         tf.reduce_sum(kwargs["mask"] * ((x - x_pred) ** 2.0), axis=(-2, -1)),
     )
 
 
-def WMSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def wmse(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: "CONFIG[tf.Tensor]") -> tf.Tensor:
     return tf.reduce_mean(
         tf.reduce_sum(
             kwargs["mask"] * (((x - x_pred) / kwargs["sigma"]) ** 2.0),
@@ -45,14 +49,18 @@ def WMSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     )
 
 
-def RMSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def rmse(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: "CONFIG[tf.Tensor]") -> tf.Tensor:
     return tf.reduce_mean(
         tf.reduce_sum(kwargs["mask"] * ((x - x_pred) ** 2.0), axis=(-2, -1))
         / tf.reduce_sum(kwargs["mask"], axis=-2),
     )
 
 
-def WRMSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def wrmse(
+    x: "tf.Tensor",
+    x_pred: "tf.Tensor",
+    kwargs: "CONFIG[tf.Tensor]",
+) -> tf.Tensor:
     return tf.reduce_mean(
         tf.sqrt(
             tf.reduce_sum(
@@ -64,7 +72,7 @@ def WRMSE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     )
 
 
-def NGLL(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def ngll(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: "CONFIG[tf.Tensor]") -> tf.Tensor:
     return tf.reduce_mean(
         tf.reduce_sum(
             kwargs["mask"]
@@ -80,7 +88,11 @@ def NGLL(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     )
 
 
-def HUBER(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def huber(
+    x: "tf.Tensor",
+    x_pred: "tf.Tensor",
+    kwargs: "CONFIG[tf.Tensor]",
+) -> tf.Tensor:
     error = kwargs["mask"] * (x - x_pred)
     cond = tf.math.abs(error) < kwargs["model"].clip_delta
 
@@ -94,7 +106,11 @@ def HUBER(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     )
 
 
-def WHUBER(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def whuber(
+    x: "tf.Tensor",
+    x_pred: "tf.Tensor",
+    kwargs: "CONFIG[tf.Tensor]",
+) -> tf.Tensor:
     error = kwargs["mask"] * (x - x_pred) / kwargs["sigma"]
     cond = tf.math.abs(error) < kwargs["model"].clip_delta
 
@@ -108,7 +124,11 @@ def WHUBER(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
     )
 
 
-def MAGNITUDE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor]):
+def magnitude(
+    x: "tf.Tensor",
+    x_pred: "tf.Tensor",
+    kwargs: "CONFIG[tf.Tensor]",
+) -> tf.Tensor:
     cond = x_pred >= 0.0
 
     amp = tf.math.log(1e-10 + (x_pred / (kwargs["mask"] * x)))
@@ -128,23 +148,24 @@ def MAGNITUDE(x: "tf.Tensor", x_pred: "tf.Tensor", kwargs: dict[str, tf.Tensor])
     return loss + loss_amp
 
 
-loss_functions = {
-    "MAE": MAE,
-    "WMAE": WMAE,
-    "MSE": MSE,
-    "WMSE": WMSE,
-    "RMSE": RMSE,
-    "WRMSE": WRMSE,
-    "NGLL": NGLL,
-    "HUBER": HUBER,
-    "WHUBER": WHUBER,
-    "MAGNITUDE": MAGNITUDE,
+loss_functions: "CONFIG[Callable[[tf.Tensor, tf.Tensor, CONFIG[tf.Tensor]], tf.Tensor]]" = {
+    "NULL": null,  # pyright:ignore[reportAssignmentType]
+    "MAE": mae,
+    "WMAE": wmae,
+    "MSE": mse,
+    "WMSE": wmse,
+    "RMSE": rmse,
+    "WRMSE": wrmse,
+    "NGLL": ngll,
+    "HUBER": huber,
+    "WHUBER": whuber,
+    "MAGNITUDE": magnitude,
 }
 
 
 def apply_gradients(
     optimiser: "ks.Optimizer",
-    model: "TFAutoencoder",
+    model: "TF_PAEModel",
 ):
     # Because the optimiser creates variables internally
     # We run into issues with the tf.function optimiser
@@ -171,7 +192,7 @@ def apply_gradients(
 
 @tf.function
 def compute_loss(
-    model: "TFAutoencoder",
+    model: "TF_PAEModel",
     flux: "tf.Tensor",
     time: "tf.Tensor",
     sigma: "tf.Tensor",
@@ -186,7 +207,7 @@ def compute_loss(
     # Cast it to float32 now
     mask = tf.cast(mask, tf.float32)
 
-    loss = loss_functions[model.loss_fn](
+    loss = model.loss_fn(
         flux,
         flux_pred,
         {"sigma": sigma, "mask": mask, "model": model},

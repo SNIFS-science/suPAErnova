@@ -146,6 +146,7 @@ max_train_phase = Requirement[int, int](
 )
 
 # TODO: Add proxy loss function for use in custom callback functions
+# TODO: Get list from tf_losses
 loss = Requirement[str, str](
     name="loss",
     description="Loss function",
@@ -161,6 +162,7 @@ loss = Requirement[str, str](
         "HUBER",
         "WHUBER",
         "MAGNITUDE",
+        "NULL",
     ],
 )
 
@@ -279,8 +281,8 @@ layer_type = Requirement[str, str](
 activation = Requirement[str, str](
     name="activation",
     description="Network activation function",
-    choice=["elu", "gelu", "relu", "swish", "tanh"],
-    default="relu",
+    choice=["ELU", "GELU", "RELU", "SWISH", "TANH", "NULL"],
+    default="RELU",
 )
 
 lr = Requirement[float, float](
@@ -313,13 +315,13 @@ optimiser = Requirement[str, str](
     name="optimiser",
     description="Which optimiser to use",
     default="ADAMW",
-    choice=["ADAM", "ADAMW", "SGD"],
+    choice=["ADAM", "ADAMW", "SGD", "NULL"],
 )
 scheduler = Requirement[str, str](
     name="scheduler",
     description="Which scheduler to use (or empty for None)",
     default="EXPONENTIAL",
-    choice=["", "EXPONENTIAL"],
+    choice=["IDENTITY", "EXPONENTIAL", "NULL"],
 )
 
 kernel_regulariser = Requirement[float, float](
@@ -417,7 +419,7 @@ latent_dim = Requirement[int, int](
 dimensions = [encode_dims, decode_dims, latent_dim]
 
 required: list["REQ"] = []
-optional: list["REQ"] = []
+optional: list["REQ"] = [*data, *training, *network_settings, *dimensions]
 required_params: list["REQ"] = []
-optional_params: list["REQ"] = [*data, *training, *network_settings, *dimensions]
+optional_params: list["REQ"] = []
 prev: list[str] = []

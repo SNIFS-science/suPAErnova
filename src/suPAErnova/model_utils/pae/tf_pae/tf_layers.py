@@ -1,18 +1,18 @@
 from typing import TYPE_CHECKING, override
 
-import keras as ks
-from keras import layers
+import keras
 import tensorflow as tf
-
-from suPAErnova.utils.suPAErnova_types import CFG
+from tensorflow.keras import layers
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from tensorflow import keras as ks
+
     from suPAErnova.utils.suPAErnova_types import CONFIG
 
 
-@ks.saving.register_keras_serializable()
+@keras.saving.register_keras_serializable()
 class FunctionLayer(layers.Layer):
     _function_registry: "CONFIG[Callable]" = {}
 

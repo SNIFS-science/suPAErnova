@@ -18,6 +18,7 @@ from suPAErnova.model_utils.pae.tf_pae import (
     tf_losses as losses,
     tf_optimisers as optimisers,
     tf_schedulers as schedulers,
+    tf_activations as activations,
 )
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from tensorflow.python.types.core import PolymorphicFunction
 
     from suPAErnova.models.pae.tf_pae import TF_PAEModel
+    from suPAErnova.config.requirements import RequirementReturn
     from suPAErnova.utils.suPAErnova_types import CFG, CONFIG
 
 
@@ -111,38 +113,35 @@ class TF_PAEStep(PAEStep):
     @override
     def _setup(self):
         super()._setup()
-        colourlaw = self.params["COLOURLAW"]
+        colourlaw = self.opts["COLOURLAW"]
         if colourlaw is not None:
             _, CL = np.loadtxt(colourlaw, unpack=True)
-            self.params["COLOURLAW"] = CL
-        self.latent_dim = self.params["LATENT_DIM"]
-        self.epochs_colour = self.params["EPOCHS_COLOUR"]
-        self.epochs_latent = self.params["EPOCHS_LATENT"]
-        self.epochs_amplitude = self.params["EPOCHS_AMPLITUDE"]
-        self.epochs_all = self.params["EPOCHS_ALL"]
-        self.validate_every_n = self.params["VALIDATE_EVERY_N"]
-        self.min_train_redshift = self.params["MIN_TRAIN_REDSHIFT"]
-        self.max_train_redshift = self.params["MAX_TRAIN_REDSHIFT"]
-        self.min_train_phase = self.params["MIN_TRAIN_PHASE"]
-        self.max_train_phase = self.params["MAX_TRAIN_PHASE"]
-        self.split_training = self.params["SPLIT_TRAINING"]
-        self.noise_scale = self.params["NOISE_SCALE"]
-        self.mask_frac = self.params["MASK_FRAC"]
-        self.sigma_time = self.params["SIGMA_TIME"]
+            self.opts["COLOURLAW"] = CL
+        self.latent_dim = self.opts["LATENT_DIM"]
+        self.epochs_colour = self.opts["EPOCHS_COLOUR"]
+        self.epochs_latent = self.opts["EPOCHS_LATENT"]
+        self.epochs_amplitude = self.opts["EPOCHS_AMPLITUDE"]
+        self.epochs_all = self.opts["EPOCHS_ALL"]
+        self.validate_every_n = self.opts["VALIDATE_EVERY_N"]
+        self.min_train_redshift = self.opts["MIN_TRAIN_REDSHIFT"]
+        self.max_train_redshift = self.opts["MAX_TRAIN_REDSHIFT"]
+        self.min_train_phase = self.opts["MIN_TRAIN_PHASE"]
+        self.max_train_phase = self.opts["MAX_TRAIN_PHASE"]
+        self.split_training = self.opts["SPLIT_TRAINING"]
+        self.noise_scale = self.opts["NOISE_SCALE"]
+        self.mask_frac = self.opts["MASK_FRAC"]
+        self.sigma_time = self.opts["SIGMA_TIME"]
         self.training_stage = "NONE"
 
-        self.lr = self.params["LR"]
-        self.lr_deltat = self.params["LR_DELTAT"]
-        self.lr_decay_rate = self.params["LR_DECAY_RATE"]
-        self.lr_decay_steps = self.params["LR_DECAY_STEPS"]
-        self.weight_decay_rate = self.params["WEIGHT_DECAY_RATE"]
-        self.batch_size = self.params["BATCH_SIZE"]
-
-        self.optimiser = optimisers.optimiser[self.params["OPTIMISER"]]
-        self.scheduler = schedulers.scheduler[self.params["SCHEDULER"]]
+        self.lr = self.opts["LR"]
+        self.lr_deltat = self.opts["LR_DELTAT"]
+        self.lr_decay_rate = self.opts["LR_DECAY_RATE"]
+        self.lr_decay_steps = self.opts["LR_DECAY_STEPS"]
+        self.weight_decay_rate = self.opts["WEIGHT_DECAY_RATE"]
+        self.batch_size = self.opts["BATCH_SIZE"]
 
         # Data Settings
-        kfold = self.params["KFOLD"]
+        kfold = self.opts["KFOLD"]
         if kfold is True:
             self.kfold = list(range(len(self.data.train_data)))
         else:
@@ -152,7 +151,7 @@ class TF_PAEStep(PAEStep):
             self.prep_data(self.data.train_data[i], "train") for i in self.kfold
         ]
         self.test_data = [self.data.test_data[i] for i in self.kfold]
-        self.validation_frac = self.params["VALIDATION_FRAC"]
+        self.validation_frac = self.opts["VALIDATION_FRAC"]
         if self.validation_frac > 0:
             split_train_data = []
             split_validation_data = []
@@ -181,7 +180,56 @@ class TF_PAEStep(PAEStep):
             for validation_data in self.validation_data
         ]
 
+        # Callback functions
+        self.setup_loss()
+        self.setup_optimiser()
+        self.setup_scheduler()
+        self.setup_activation()
+
+        # Model parameters
+        self.model_params = [
+            "COLOURLAW",
+            "LOSS",
+            "LOSS_AMPLITUDE_OFFSET",
+            "LOSS_AMPLITUDE_PARAMETER",
+            "LOSS_COVARIANCE",
+            "DECORRELATE_DUST",
+            "DECORRELATE_ALL",
+            "SAVE_MODEL",
+            "LOAD_BEST",
+            "LAYER_TYPE",
+            "ACTIVATION",
+            "KERNEL_REGULARISER",
+            "DROPOUT",
+            "BATCHNORM",
+            "PHYSICAL_LATENT",
+            "ENCODE_DIMS",
+            "DECODE_DIMS",
+            "LATENT_DIM",
+        ]
+        self.params = {
+            model_param: self.opts[model_param] for model_param in self.model_params
+        }
+
         return (True, None)
+
+    @callback
+    def setup_loss(self) -> None:
+        self.opts["LOSS"] = losses.loss_functions[self.opts["LOSS"].upper()]
+
+    @callback
+    def setup_optimiser(self) -> None:
+        self.optimiser = optimisers.optimiser[self.opts["OPTIMISER"]]
+
+    @callback
+    def setup_scheduler(self) -> None:
+        self.scheduler = schedulers.scheduler[self.opts["SCHEDULER"]]
+
+    @callback
+    def setup_activation(self) -> None:
+        self.opts["ACTIVATION"] = activations.activation[
+            self.opts["ACTIVATION"].upper()
+        ]
 
     def prep_data(self, data: "CFG", data_type: str) -> "CFG":
         redshift_mask = (data["redshift"] >= self.min_train_redshift) & (
@@ -212,15 +260,16 @@ class TF_PAEStep(PAEStep):
 
     def save_model(
         self,
-        model: "TFAutoencoder",
-        batch: tuple[tf.Tensor, tf.Tensor, tf.Tensor],
+        model: "TF_PAEModel",
+        *,
+        batch: tuple[tf.Tensor, tf.Tensor, tf.Tensor] | None = None,
         is_best: bool = False,
     ) -> None:
         if not model.save_model:
             return
 
         def _latent_means(
-            mod: "TFAutoencoder",
+            mod: "TF_PAEModel",
         ) -> tuple[
             tf.Tensor,
             tf.Tensor,
@@ -248,7 +297,7 @@ class TF_PAEStep(PAEStep):
         model_save = self.model_cls(self, {**model.training_params, "training": False})
         model_save.encoder.set_weights(model.encoder.get_weights())
 
-        if model.physical_latent:
+        if model.physical_latent and batch is not None:
             # Calculate mean flux
             moving_means = _latent_means(model_save)
 
@@ -525,6 +574,7 @@ class TF_PAEStep(PAEStep):
         )
 
     # TODO: Make tf.function
+    @callback
     def train_model(self) -> None:
         lr_ini = self.model.learning_rate
         lr = self.scheduler(
@@ -590,11 +640,11 @@ class TF_PAEStep(PAEStep):
                     validation_loss_min = min(validation_loss_min, validation_loss)
                     self.save_model(
                         self.model,
-                        batch[:-1],
+                        batch=batch[:-1],
                         is_best=True,
                     )  # Drop batch_sigma
                 iteration += 1
-        self.save_model(self.model, batch[:-1])  # Drop batch_sigma
+        self.save_model(self.model, batch=batch[:-1])  # Drop batch_sigma
         self.load_checkpoint()  # Load best (or last) checkpoint in preperation for the next training stage
 
     @callback
@@ -668,6 +718,9 @@ class TF_PAEStep(PAEStep):
         weights = self.checkpoint_layer.get_weights()[0]
         # Overwrite previous checkpoint's training
         weights[:, 0] = init_weights[:, 0] / 100  # TODO: Why 100?
+        self.encoder.layers[self.checkpoint_ind].set_weights([weights])
+        self.model.encoder.set_weights(self.encoder.get_weights())
+        self.model.decoder.set_weights(self.decoder.get_weights())
         self.train_model()
 
     @callback
@@ -685,17 +738,40 @@ class TF_PAEStep(PAEStep):
 
     @override
     def _is_completed(self) -> bool:
-        return False
+        self.training_stage = "final"
+        self.model = self.model_cls(
+            self,
+            {
+                "training": False,
+                "train_stage": self.latent_dim + 2,
+                "learning_rate": self.lr_deltat,
+            },
+        )
+        is_completed = True
+        for kfold in self.kfold:
+            self.current_kfold = kfold
+            encoder_file, decoder_file = self.model_name(
+                self.model,
+                self.model.load_best,
+            )
+            is_completed = encoder_file.exists() and decoder_file.exists()
+            if not is_completed:
+                break
+        return is_completed
 
     @override
-    def _load(self) -> None:
-        return None
+    def _load(self) -> "RequirementReturn[None]":
+        success, result = super()._load()
+        if not success:
+            return False, result
+        self.load_checkpoint()
+        return True, None
 
     @override
     def _run(self):
         # tf.debugging.enable_check_numerics()
         # tf.debugging.enable_traceback_filtering()
-        for kfold, data in enumerate(
+        for i, data in enumerate(
             zip(
                 self.train_data,
                 self.test_data,
@@ -703,7 +779,7 @@ class TF_PAEStep(PAEStep):
                 strict=True,
             ),
         ):
-            self.current_kfold = kfold
+            self.current_kfold = self.kfold[i]
             self.training_data = cast(
                 "tuple[CONFIG[tf.Tensor], CONFIG[tf.Tensor], CONFIG[tf.Tensor]]",
                 tuple(
@@ -734,4 +810,18 @@ class TF_PAEStep(PAEStep):
 
     @override
     def _result(self):
+        if self.force or not self._is_completed():
+            self.training_stage = "all"
+            self.load_checkpoint()  # Load best (or last) checkpoint
+            self.training_stage = "final"
+            self.training_params = {
+                "training": False,
+                "train_stage": self.latent_dim + 2,
+                "learning_rate": self.lr_deltat,
+            }
+            self.model = self.model_cls(self, self.training_params)
+            self.model.encoder.set_weights(self.encoder.get_weights())
+            self.model.decoder.set_weights(self.decoder.get_weights())
+            self.save_model(self.model, is_best=self.model.load_best)
+
         return True, None

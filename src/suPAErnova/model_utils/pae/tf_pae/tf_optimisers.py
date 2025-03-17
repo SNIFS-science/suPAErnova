@@ -1,18 +1,31 @@
-from typing import Any
+from typing import TYPE_CHECKING
 
-import keras as ks
+from tensorflow import keras as ks
 
-# TODO: Make modular
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from suPAErnova.utils.suPAErnova_types import CFG, CONFIG
 
 
-def adam(lr: ks.optimizers.schedules.LearningRateSchedule | float, _: dict[str, Any]):
+def null(
+    _lr: ks.optimizers.schedules.LearningRateSchedule | float,
+    _kwargs: "CFG",
+) -> None:
+    return None
+
+
+def adam(
+    lr: ks.optimizers.schedules.LearningRateSchedule | float,
+    _kwargs: "CFG",
+) -> ks.optimizers.Optimizer:
     return ks.optimizers.Adam(learning_rate=lr)
 
 
 def adamw(
     lr: ks.optimizers.schedules.LearningRateSchedule | float,
-    kwargs: dict[str, Any],
-):
+    kwargs: "CFG",
+) -> ks.optimizers.Optimizer:
     wd_schedule = ks.optimizers.schedules.ExponentialDecay(
         initial_learning_rate=kwargs["weight_decay_rate"],
         decay_steps=kwargs["lr_decay_steps"],
@@ -24,8 +37,16 @@ def adamw(
     return optimiser
 
 
-def sgd(lr: ks.optimizers.schedules.LearningRateSchedule | float, _: dict[str, Any]):
+def sgd(
+    lr: ks.optimizers.schedules.LearningRateSchedule | float,
+    _kwargs: "CFG",
+) -> ks.optimizers.Optimizer:
     return ks.optimizers.SGD(learning_rate=lr, momentum=0.9)
 
 
-optimiser = {"ADAM": adam, "ADAMW": adamw, "SGD": sgd}
+optimiser: "CONFIG[Callable[[ks.optimizers.schedules.LearningRateSchedule | float, CFG], ks.optimizers.Optimizer]]" = {
+    "NULL": null,
+    "ADAM": adam,
+    "ADAMW": adamw,
+    "SGD": sgd,
+}

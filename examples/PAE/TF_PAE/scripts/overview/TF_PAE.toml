@@ -88,7 +88,7 @@
     #   - "HUBER": [Huber](https://www.tensorflow.org/api_docs/python/tf/keras/losses/Huber)
     #   - "WHUBER": Weighted [Huber](https://www.tensorflow.org/api_docs/python/tf/keras/losses/Huber)
     #   - "MAGNITUDE": Custom loss function comparing spectral magnitudes
-    #   - "NULL": Custom loss function which returns 0 no matter what. Designed for use with custom user-defined loss functions, integrated through callbacks.
+    #   - "NULL": Custom loss function which returns None no matter what. Designed for use with custom user-defined loss functions, integrated through callbacks.
     #   Defaults to WMAE
     loss = "WMAE"
 
@@ -150,13 +150,14 @@
     layer_type = "DENSE"
 
     # Which activation function to use. Possible values include:
-    #   - "elu": Use an [Exponential Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/elu) activation function
-    #   - "gelu": Use a [Gaussian Error Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/gelu) activation function
-    #   - "relu": Use a [REctified Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/relu) activation function
-    #   - "swish": Use a [Swish / Silu](https://www.tensorflow.org/api_docs/python/tf/keras/activations/silu) activation function
-    #   - "tanh": Use a [Hyperbolic Tangent](https://www.tensorflow.org/api_docs/python/tf/keras/activations/tanh) activation function
-    #   Defaults to "relu"
-    activation = "relu"
+    #   - "ELU": Use an [Exponential Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/elu) activation function
+    #   - "GELU": Use a [Gaussian Error Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/gelu) activation function
+    #   - "RELU": Use a [REctified Linear Unit](https://www.tensorflow.org/api_docs/python/tf/keras/activations/relu) activation function
+    #   - "SWISH": Use a [Swish / Silu](https://www.tensorflow.org/api_docs/python/tf/keras/activations/silu) activation function
+    #   - "TANH": Use a [Hyperbolic Tangent](https://www.tensorflow.org/api_docs/python/tf/keras/activations/tanh) activation function
+    #   - "NULL": Custom activation function which returns None no matter what. Designed for use with custom user-defined activation functions, integrated through callbacks.
+    #   Defaults to "RELU"
+    activation = "RELU"
 
     # What learning rate to use for training
     #   Defaults to 0.005
@@ -170,6 +171,7 @@
     #   - "ADAM": Use an [Adam](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/Adam) optimiser.
     #   - "ADAMW": Use a [Weighted Adam](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/AdamW) optimiser.
     #   - "SGD": Use a [Gradient Descent with Momentum](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/SGD) optimiser.
+    #   - "NULL": Custom optimiser which returns None no matter what. Designed for use with custom user-defined optimisers, integrated through callbacks.
     #   Defaults to "ADAMW"
     optimiser = "ADAMW"
 
@@ -179,7 +181,8 @@
 
     # Which scheduler to use. Possible values include:
     #   - "EXPONENTIAL": Use an [Exponential Decay](https://www.tensorflow.org/api_docs/python/tf/keras/optimizers/schedules/ExponentialDecay) scheduler.
-    #   - "": Use an Identity scheduler, which just returns the provided learning rate.
+    #   - "IDENTITY": Use an Identity scheduler, which just returns the provided learning rate.
+    #   - "NULL": Custom scheduler which returns None no matter what. Designed for use with custom user-defined schedulers, integrated through callbacks.
     #   Defaults to "EXPONENTIAL"
     scheduler = "EXPONENTIAL"
 
@@ -221,3 +224,21 @@
     # The number of non-physical latent dimensions to encode.
     #   Defaults to 3
     latent_dim = 3
+
+    # === Callbacks ===
+    [tf_pae.callbacks]
+        analyse          = "callbacks/analyse.py"
+        result           = "callbacks/result.py"
+        run              = "callbacks/run.py"
+        setup            = "callbacks/setup.py"
+        setup_activation = "callbacks/setup_activation.py"
+        setup_loss       = "callbacks/setup_loss.py"
+        setup_optimiser  = "callbacks/setup_optimiser.py"
+        setup_scheduler  = "callbacks/setup_scheduler.py"
+        train_all        = "callbacks/train_all.py"
+        train_amplitude  = "callbacks/train_amplitude.py"
+        train_colour     = "callbacks/train_colour.py"
+        train_latents    = "callbacks/train_latents.py"
+        train_model      = "callbacks/train_model.py"
+        train_time       = "callbacks/train_time.py"
+        validate         = "callbacks/validate.py"

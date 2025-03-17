@@ -32,7 +32,7 @@ class TF_PAEModel(ks.Model, PAEModel):
         self.moving_means = self.training_params.get("moving_means", [0.0, 0.0, 0.0])
 
         self.colourlaw = self.params["COLOURLAW"]
-        self.loss_fn = self.params["LOSS"].upper()
+        self.loss_fn = self.params["LOSS"]
         self.loss_amplitude_offset = self.params["LOSS_AMPLITUDE_OFFSET"]
         self.loss_amplitude_parameter = self.params["LOSS_AMPLITUDE_PARAMETER"]
         self.loss_covariance = self.params["LOSS_COVARIANCE"]
@@ -43,7 +43,7 @@ class TF_PAEModel(ks.Model, PAEModel):
 
         # Network Settings
         self.layer_type = self.params["LAYER_TYPE"].upper()
-        self.activation = self.params["ACTIVATION"]  # TODO: Make modular
+        self.activation = self.params["ACTIVATION"]
 
         if self.params["KERNEL_REGULARISER"] > 0:
             self.kernel_regulariser = ks.regularizers.l2(

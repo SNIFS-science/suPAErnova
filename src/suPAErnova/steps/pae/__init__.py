@@ -12,7 +12,7 @@ from suPAErnova.models.pae import models
 
 if TYPE_CHECKING:
     from suPAErnova.steps.data import DATAStep
-    from suPAErnova.config.requirements import REQ
+    from suPAErnova.config.requirements import REQ, RequirementReturn
     from suPAErnova.utils.suPAErnova_types import CFG
 
     M = TypeVar("M")
@@ -106,8 +106,8 @@ class PAEStep(Step):
         return False
 
     @override
-    def _load(self) -> None:
-        return None
+    def _load(self) -> "RequirementReturn[None]":
+        return True, None
 
     @override
     def _run(self):
