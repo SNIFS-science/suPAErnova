@@ -5,16 +5,16 @@ from tensorflow import keras as ks
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from suPAErnova.utils.suPAErnova_types import CONFIG
+    from suPAErnova.utils.suPAErnova_types import CFG
 
 
-def null(_lr: float, _kwargs: "CONFIG[Any]") -> None:
+def null(_lr: float, _kwargs: "CFG") -> None:
     return None
 
 
 def exponential(
     lr: float,
-    kwargs: "CONFIG[Any]",
+    kwargs: "CFG",
 ) -> ks.optimizers.schedules.LearningRateSchedule:
     return ks.optimizers.schedules.ExponentialDecay(
         initial_learning_rate=lr,
@@ -23,12 +23,12 @@ def exponential(
     )
 
 
-def identity(lr: float, _kwargs: "CONFIG[Any]") -> float:
+def identity(lr: float, _kwargs: "CFG") -> float:
     return lr
 
 
-scheduler: "CONFIG[Callable[[float, dict[str, Any]], ks.optimizers.schedules.LearningRateSchedule | float]]" = {
-    "NULL": null,  # pyright:ignore[reportAssignmentType]
+scheduler: "CONFIG[Callable[[float, CFG], Any]], ks.optimizers.schedules.LearningRateSchedule | float]]" = {
+    "NULL": null,
     "IDENTITY": identity,
     "EXPONENTIAL": exponential,
 }

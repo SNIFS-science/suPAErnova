@@ -1,8 +1,8 @@
 def pre(self) -> None:
-    print("pre-activation callback")
+    print("pre-setup_activation callback")
     print(self.opts["ACTIVATION"])
 
 
 def post(self) -> None:
-    print("post-activation callback")
+    print("post-setup_activation callback")
     print(self.opts["ACTIVATION"])

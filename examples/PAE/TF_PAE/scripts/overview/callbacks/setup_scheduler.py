@@ -1,8 +1,8 @@
 def pre(self) -> None:
-    print("pre-scheduler callback")
+    print("pre-setup_scheduler callback")
     print(self.opts["SCHEDULER"])
 
 
 def post(self) -> None:
-    print("post-scheduler callback")
+    print("post-setup_scheduler callback")
     print(self.scheduler)
