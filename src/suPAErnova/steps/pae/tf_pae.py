@@ -727,6 +727,9 @@ class TF_PAEStep(PAEStep):
             else:
                 self.train_all()
 
+            # Clear GPU Memory between kfolds
+            ks.backend.clear_session()
+
         return True, None
 
     @override
