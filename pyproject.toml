@@ -8,10 +8,11 @@
         "coloredlogs>=15.0.1",
         "matplotlib>=3.10.0",
         "pandas>=2.2.3",
+        "pydantic>=2.10.6",
         "sncosmo>=2.12.0",
         "toml>=0.10.2",
         "tqdm>=4.67.1",
-    ]
+]
     description = "Add your description here"
     name = "suPAErnova"
     readme = "README.md"
@@ -19,7 +20,11 @@
     version = "0.1.0"
 
 [dependency-groups]
-    dev = ["pandas-stubs>=2.2.3.241126", "types-tensorflow>=2.18.0.20241227"]
+    dev = [
+    "pandas-stubs>=2.2.3.241126",
+    "pytest>=8.3.5",
+ "types-tensorflow>=2.18.0.20241227",
+]
 
     default = [
         "tensorflow>=2.18.0",
@@ -59,6 +64,10 @@
 
     [tool.uv.sources]
         tensorflow-rocm = {url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.3.2/tensorflow_rocm-2.17.0-cp312-cp312-manylinux_2_28_x86_64.whl"}
+        suPAErnova_legacy = {workspace = true}
+
+    [tool.uv.workspace]
+        members = ["packages/*"]
 
 [tool.basedpyright]
 
