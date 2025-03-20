@@ -15,6 +15,7 @@ import click
 from pydantic import ValidationError
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+from suPAErnova.configs import SNPAEConfig
 from suPAErnova.logging import setup_logging
 from suPAErnova.configs.input import InputConfig
 from suPAErnova.configs.paths import PathConfig
@@ -107,7 +108,7 @@ def main(
         with cm:
             # Normalise input_config
             user_config = cast(
-                "Configuration", InputConfig.normalise_input(input_config)
+                "Configuration", SNPAEConfig.normalise_input(input_config)
             )
 
             # Setup globals config
