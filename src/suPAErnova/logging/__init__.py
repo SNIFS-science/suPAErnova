@@ -17,18 +17,6 @@ def setup_logging(
     log_path: "Path | None" = None,
     verbose: bool = False,
 ) -> logging.Logger:
-    """Setup the logger for the given SuPAErnova module.
-
-    Args:
-        module (str): The module name (typically __name__)
-
-    Kwargs:
-        out_path (Path | None): The path to the output log file. If a directory, the resulting log file will be `out_path / {module}.log`. If not provided, then no file_handler will be associated with the logger.
-        verbose (bool): Increase log verbosity. Defaults to False.
-
-    Returns:
-        logging.Logger: The logger for the given module
-    """
     logger = logging.getLogger(module)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
@@ -56,7 +44,6 @@ def setup_logging(
     stream_handler.setLevel(stream_level)
     stream_handler.setFormatter(stream_fmt)
     logger.addHandler(stream_handler)
-    logger.debug(f"{module} Stream Handler created.")
 
     # --- File Handler ---
     if log_path is not None:
@@ -76,7 +63,5 @@ def setup_logging(
         file_handler.setLevel(file_level)
         file_handler.setFormatter(file_fmt)
         logger.addHandler(file_handler)
-
-        logger.debug(f"{module} File Handler created. Writing to {log_path}")
 
     return logger

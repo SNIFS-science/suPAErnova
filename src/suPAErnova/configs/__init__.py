@@ -1,62 +1,84 @@
 # Copyright 2025 Patrick Armstrong
-"""Pydantic Models for use throughout SuPAErnova."""
 
-from typing import TYPE_CHECKING
-
-# Used to define Pydantic model, so don't put into TYPE_CHECKING block
-from logging import Logger  # NOQA: TC003
+from typing import TYPE_CHECKING, Self
+from logging import Logger  # noqa: TC003
+from pathlib import Path
+from collections.abc import Callable
 
 import toml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from suPAErnova.logging import setup_logging
-
-# Used to define Pydantic model, so don't put into TYPE_CHECKING block
-from suPAErnova.configs.paths import PathConfig  # NOQA: TC001
-from suPAErnova.configs.globals import GlobalConfig  # NOQA: TC001
+from suPAErnova.configs.paths import PathConfig  # noqa: TC001
+from suPAErnova.configs.config import GlobalConfig  # noqa: TC001
 
 if TYPE_CHECKING:
-    from suPAErnova.typings import Input, Configuration
+    from typing import Any
 
 
 class SNPAEConfig(BaseModel):
-    """Generic model from which most SuPAErnova configs inherit."""
-
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True)  # pyright: ignore[reportIncompatibleVariableOverride]
 
-    globals: "GlobalConfig"
+    # Required
+    config: "GlobalConfig"
     paths: "PathConfig"
     log: "Logger"
 
+    # Optional
+    callbacks: dict[str, str | dict[str, Callable[[Self], None]]] = {}
+
+    @model_validator(mode="after")
+    def validate_callbacks(self) -> Self:
+        for fn, callback in self.callbacks.items():
+            if isinstance(callback, str):
+                fn_callbacks = {}
+                callback_path = self.paths.resolve_path(
+                    Path(callback), relative_path=self.paths.base
+                )
+                if not callback_path.exists():
+                    err = f"`{fn}` callback: `{callback}` resolved to `{callback_path}`, which does not exist."
+                    raise ValueError(err)
+                with callback_path.open("r") as io:
+                    script_code = io.read()
+                # Create an isolated namespace
+                local_scope = {}
+                exec(script_code, globals(), local_scope)  # noqa: S102
+                if "pre" in local_scope:
+                    if not isinstance(local_scope["pre"], Callable):
+                        err = f"`pre-{fn}` callback is not callable"
+                        raise ValueError(err)
+                    fn_callbacks["pre"] = local_scope["pre"]
+                if "post" in local_scope:
+                    if not isinstance(local_scope["post"], Callable):
+                        err = f"`pre-{fn}` callback is not callable"
+                        raise ValueError(err)
+                    fn_callbacks["post"] = local_scope["post"]
+                self.callbacks[fn] = fn_callbacks
+        self.callbacks = self.normalise_input(self.callbacks)
+        return self
+
     @classmethod
-    def init(
+    def from_config(
         cls,
-        input_config: "Configuration",
-    ) -> "SNPAEConfig":
-        """User-defined input configuration which controls the behaviour of SuPAErnova.
-
-        Args:
-            input_config (Configuration): User-defined input configuration.
-
-        Returns:
-            InputConfig: The input configuration.
-        """
-        default_config = {
-            "log": setup_logging(
-                cls.__name__,
-                log_path=input_config["paths"].log,
-                verbose=input_config["globals"].verbose,
-            )
-        }
-        config = {**default_config, **input_config}
+        input_config: dict[str, "Any"],
+    ) -> Self:
+        config = {**cls.default_config(input_config), **input_config}
         cfg = cls.model_validate(config)
-        cfg.log.debug(f"{cls.__name__}:\n{cfg.model_dump()}")
         cfg.save()
         return cfg
 
+    @classmethod
+    def default_config(cls, input_config: dict[str, "Any"]) -> dict[str, "Any"]:
+        return {
+            "log": setup_logging(
+                cls.__name__,
+                log_path=input_config["paths"].log,
+                verbose=input_config["config"].verbose,
+            )
+        }
+
     def save(self) -> None:
-        """Save config file to `self.paths.out / f"{self.__class__.__class__}.toml"."""
-        save_file = self.paths.out / f"{self.__class__.__name__}.toml"
+        save_file = self.paths.log / f"{self.__class__.__name__}.toml"
         with save_file.open(
             "w",
             encoding="utf-8",
@@ -64,16 +86,8 @@ class SNPAEConfig(BaseModel):
             toml.dump(self.model_dump(exclude={"log"}), io)
 
     @staticmethod
-    def normalise_input(input_config: "Input") -> "Input":
-        """Prepare an input config for use by forcing all keys to be lowercase.
-
-        Args:
-            input_config (Input): The input config to normalise.
-
-        Returns:
-            Input: The normalised config.
-        """
-        rtn: Input = {}
+    def normalise_input(input_config: dict[str, "Any"]) -> dict[str, "Any"]:
+        rtn: dict[str, Any] = {}
         for k, v in input_config.items():
             val = v
             if isinstance(v, dict):

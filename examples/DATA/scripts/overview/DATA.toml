@@ -29,11 +29,11 @@
     salt_model = "salt3"
 
     # Minimum phase for spectral data, relative to peak. Spectral data earlier than this phase will be cut.
-    #   Defaults to -10.0
+    #   Defaults to -10
     min_phase = -10
 
     # Maximum phase for spectral data, relative to peak. Spectral data later than this phase will be cut.
-    #   Defaults to 40.0
+    #   Defaults to 40
     max_phase = 40
 
     # The fraction of data to be used for training, with the rest of the data going to testing and validation.

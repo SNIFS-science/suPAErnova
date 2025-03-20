@@ -1,73 +1,63 @@
 # Copyright 2025 Patrick Armstrong
-"""Paths used throughout SuPAErnova."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import (
+    BaseModel,
+    DirectoryPath,  # noqa: TC002
+)
 
 if TYPE_CHECKING:
-    from suPAErnova.typings import Input
+    from pydantic import (
+        JsonValue,
+    )
 
 
 class PathConfig(BaseModel):
-    """Paths used throughout SuPAErnova.
+    base: "DirectoryPath" = Path.cwd()
+    out: "DirectoryPath"
+    log: "DirectoryPath"
 
-    Attributes:
-        base (Path): The directory from which all paths are assumed to be relative. Defaults to the parent directory of input_path if using the cli, otherwise defaults to cwd.
-        out (Path): Path that will contain all SuPAErnova output files. Defaults to `base/output`
-        log (Path): Path to log file. Defaults to `base/__name__.log`
-    """
-
-    base: Path = Path.cwd()
-    out: Path
-    log: Path
-
-    @staticmethod
-    def init(
-        input_config: "Input",
+    @classmethod
+    def from_config(
+        cls,
+        input_config: dict[str, "JsonValue"],
         *,  # Force keyword-only arguments
-        base_path: "Path",
-        out_path: "Path",
-        log_path: "Path",
+        base_path: "DirectoryPath",
+        out_path: "DirectoryPath",
+        log_path: "DirectoryPath",
     ) -> "PathConfig":
-        """Setup paths used by all steps.
+        config = {
+            **cls.default_config(
+                base_path=base_path, out_path=out_path, log_path=log_path
+            ),
+            **input_config,
+        }
+        return cls.model_validate(config)
 
-        Args:
-            input_config (Input): Configuration dictionary to setup / update.
-
-        Kwargs:
-            base_path (Path): The directory from which all paths are assumed to be relative.
-            out_path (Path): Directory that will contain all SuPAErnova output files.
-            log_path (Path): Directory that will contain all log files.
-
-        Returns:
-            GlobalConfig: The global configuration.
-        """
-        default_path_config = {"base": base_path, "out": out_path, "log": log_path}
-        path_config = {**default_path_config, **input_config}
-        return PathConfig.model_validate(path_config)
+    @classmethod
+    def default_config(
+        cls,
+        *,  # Force keyword-only arguments
+        base_path: "DirectoryPath",
+        out_path: "DirectoryPath",
+        log_path: "DirectoryPath",
+    ) -> dict[str, "Any"]:
+        return {"base": base_path, "out": out_path, "log": log_path}
 
     @staticmethod
     def resolve_path(
-        input_path: Path | None,
+        input_path: Path | None = None,
         *,
-        default_path: Path,
+        default_path: Path | None = None,
         relative_path: Path,
         mkdir: bool = False,
     ) -> Path:
-        """Resolve path to be absolute.
-
-        Args:
-            input_path (Path | None): The path to resolve, or None to use the default_path.
-            default_path (Path): The path to default back to if no input_path is provided.
-            relative_path (Path): The path that input_path should be relative to, if an absolute path was not provided.
-            mkdir (Bool): Whether the resolved path should be created if it doesn't exist. Defaults to False.
-
-        Returns:
-            Path: The resolved path
-        """
         if input_path is None:
+            if default_path is None:
+                err = "Cannot resolve `input_path=None` with `default_path=None"
+                raise ValueError(err)
             input_path = default_path
         if not input_path.is_absolute():
             input_path = relative_path / input_path

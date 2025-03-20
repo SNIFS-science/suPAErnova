@@ -19,10 +19,11 @@ from suPAErnova.configs import SNPAEConfig
 from suPAErnova.logging import setup_logging
 from suPAErnova.configs.input import InputConfig
 from suPAErnova.configs.paths import PathConfig
-from suPAErnova.configs.globals import GlobalConfig
+from suPAErnova.configs.steps import StepConfig
+from suPAErnova.configs.config import GlobalConfig
 
 if TYPE_CHECKING:
-    from suPAErnova.typings import Input, Configuration
+    from pydantic import JsonValue
 
 
 @click.command()
@@ -49,18 +50,7 @@ def cli(
     base_path: Path | None = None,
     out_path: Path | None = None,
 ) -> None:
-    """Command line interface for SuPAErnova.
-
-    Args:
-        input_path (Path): Path to the config.toml containing your desired configuration. Can be absolute or relative (to cwd).
-
-    Kwargs:
-        verbose (bool): Increase log verbosity. Defaults to False.
-        force (bool): Force every step to run, even if a previous result already exists. Defaults to False.
-        base_path (Path): The directory from which all paths are assumed to be relative. Can be absolute or relative (to cwd). Defaults to the parent directory of input_path.
-        out_path (Path): Path that will contain all SuPAErnova output files. Can be absolute, or relative (to base_path). Defaults to `base_path/output`.
-    """
-    input_config: Input = toml.load(input_path)
+    input_config: dict[str, JsonValue] = toml.load(input_path)
 
     # Set base_path to input_path.parent if none provided
     base_path = PathConfig.resolve_path(
@@ -79,24 +69,13 @@ def cli(
 
 
 def main(
-    input_config: "Input",
+    input_config: dict[str, "JsonValue"],
     *,  # Force keyword-only arguments
     verbose: bool = False,
     force: bool = False,
     base_path: Path | None = None,
     out_path: Path | None = None,
 ) -> None:
-    """Main SuPAErnova entry point, executing each of the steps defined in config.
-
-    Args:
-        input_config (Input): Configuration dictionary which describes and controls each step
-
-    Kwargs:
-        verbose (bool): Increase log verbosity. Defaults to False
-        force (bool): Force every step to run, even if a previous result already exists. Defaults to False
-        base_path (Path): The directory from which all paths are assumed to be relative. Can be absolute or related (to cwd). Deaults to cwd.
-        out_path (Path): Path that will contain all SuPAErnova output files. Can be absolute, or relative (to base_path). Defaults to `base_path/output`.
-    """
     log = setup_logging(__name__, verbose=verbose)
     log.info("Started SuPAErnova")
 
@@ -107,13 +86,11 @@ def main(
         cm = logging_redirect_tqdm() if verbose else contextlib.nullcontext()
         with cm:
             # Normalise input_config
-            user_config = cast(
-                "Configuration", SNPAEConfig.normalise_input(input_config)
-            )
+            user_config = SNPAEConfig.normalise_input(input_config)
 
-            # Setup globals config
-            user_config["globals"] = GlobalConfig.init(
-                cast("Input", user_config.get("globals", {})),
+            # Setup global config
+            user_config["config"] = GlobalConfig.from_config(
+                cast("dict[str, JsonValue]", user_config.get("config", {})),
                 verbose=verbose,
                 force=force,
             )
@@ -136,19 +113,28 @@ def main(
                 relative_path=base_path,
                 mkdir=True,
             )
-            user_config["paths"] = PathConfig.init(
-                cast("Input", user_config.get("paths", {})),
+            # Re-setup base logger to include log file
+            log = setup_logging(__name__, log_path=log_path.parent, verbose=verbose)
+            user_config["paths"] = PathConfig.from_config(
+                cast("dict[str, JsonValue]", user_config.get("paths", {})),
                 base_path=base_path,
                 out_path=out_path,
                 log_path=log_path,
             )
 
-            # Re-setup base logger to include log file
-            log = setup_logging(__name__, log_path=log_path, verbose=verbose)
+            # Propagate global and paths to steps
+            for step, step_config in StepConfig.steps.items():
+                if step in user_config:
+                    user_config[step] = step_config.from_config({
+                        "config": user_config["config"],
+                        "paths": user_config["paths"],
+                        **user_config[step],
+                    })
 
-            config = InputConfig.init(user_config)
+            config = InputConfig.from_config(user_config)
+            config.run()
     except ValidationError as e:
-        log.error(e)  # NOQA: TRY400
+        log.error(e)  # noqa: TRY400
         sys.exit(1)
     except Exception:
         log.exception(traceback.format_exc())
