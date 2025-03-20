@@ -129,6 +129,7 @@
 
         # Rules to ignore
         ignore = [
+            "COM812",  # Missing trailing comma, already handled by formatter
             "E501",    # Line too long 
             "ERA001",  # Found commented out code
             "G004",    # Logging statement uses f-string

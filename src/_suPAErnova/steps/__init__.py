@@ -1,0 +1,355 @@
+from abc import abstractmethod
+from typing import TYPE_CHECKING, Any, Self, TypeVar, override
+from pathlib import Path
+import traceback
+from collections.abc import Callable
+
+import toml
+from tqdm import tqdm
+
+import suPAErnova.analysis as analyses
+from suPAErnova.config.requirements import Requirement
+
+if TYPE_CHECKING:
+    from typing import ClassVar
+    from logging import Logger
+    from collections.abc import Iterable
+
+    from suPAErnova.config.requirements import REQ, RequirementReturn
+    from suPAErnova.utils.suPAErnova_types import CFG, CONFIG
+
+
+# === Optional Requirements ===
+# --- Force Run ---
+force = Requirement[bool, bool](
+    name="force",
+    description="Force rerun step, overwriting previous run",
+    default=False,
+)
+
+analysis = Requirement[dict, dict](
+    name="analysis",
+    description="Plotting and analysis options",
+    default={},
+)
+
+
+def get_callbacks(
+    callbacks: "CONFIG[str | CONFIG[Callable]]",
+    cfg: "CFG",
+    _2: "CFG",
+) -> "RequirementReturn[CONFIG[CONFIG[Callable]]]":
+    rtn = {}
+    for key, val in callbacks.items():
+        rtn[key] = {}
+        # Script-mode: key is function name, val is path to function callback script
+        if isinstance(val, str):
+            path = Path(val)
+            if not path.is_absolute():
+                path = cfg["BASE"] / path
+            if not path.exists():
+                return False, f"{path} does not exist"
+            with path.open("r") as io:
+                script_code = io.read()
+            # Create an isolated namespace
+            local_scope = {}
+            exec(script_code, globals(), local_scope)
+            if "pre" in local_scope:
+                if not isinstance(local_scope["pre"], Callable):
+                    return False, f"pre-{key} is not callable"
+                rtn[key]["pre"] = local_scope["pre"]
+            if "post" in local_scope:
+                if not isinstance(local_scope["post"], Callable):
+                    return False, f"post-{key} is not callable"
+                rtn[key]["post"] = local_scope["post"]
+        # Library-mode: key is function name, val is dictionary containing pre and post functions
+        else:
+            if "PRE" in val:
+                rtn[key]["pre"] = val["PRE"]
+            if "POST" in val:
+                rtn[key]["post"] = val["POST"]
+    return True, rtn
+
+
+callbacks = Requirement[dict, dict](
+    name="callbacks",
+    description="Path to scripts containing callback functions",
+    default={},
+    transform=get_callbacks,
+)
+
+
+class Callback:
+    def __init__(self) -> None:
+        self.callbacks: CONFIG[CONFIG[Callable[[Self], None]]] = {}
+
+
+if TYPE_CHECKING:
+    S = TypeVar("S", bound=Callback)
+    R = TypeVar("R")
+
+
+def callback(
+    fn: "Callable[[S], R]",
+) -> "Callable[[S], R]":
+    def wrapper(self: "S") -> "R":
+        callbacks = self.callbacks.get(fn.__name__.upper(), {})
+        pre_callback = callbacks.get("pre")
+        if pre_callback is not None:
+            pre_callback(self)
+        rtn = fn(self)
+        post_callback = callbacks.get("post")
+        if post_callback is not None:
+            post_callback(self)
+        return rtn
+
+    return wrapper
+
+
+class Step(Callback):
+    required: "ClassVar[list[REQ]]" = []
+    optional: "ClassVar[list[REQ]]" = [force, analysis, callbacks]
+    prev: "ClassVar[list[str]]" = []
+
+    @classmethod
+    def __update__(cls) -> None:
+        if cls is Step:
+            return
+        parent_cls = next(
+            (
+                parent
+                for parent in cls.__bases__
+                if issubclass(parent, Step) and parent is not Step
+            ),
+            Step,
+        )
+        # Create new lists instead of mutating to avoid side effects
+        cls.required = parent_cls.required + cls.required
+        cls.optional = parent_cls.optional + cls.optional
+        cls.prev = parent_cls.prev + cls.prev
+
+    def __init_subclass__(cls, **kwargs: "CFG") -> None:
+        super().__init_subclass__(**kwargs)
+        cls.__update__()
+
+    def __init__(self, config: "CFG") -> None:
+        super().__init__()
+        self.name: str = self.__class__.__name__.upper().replace("STEP", "")
+        self.is_setup: bool = False
+        self.has_run: bool = False
+
+        self.orig_config: CFG = config
+        self.global_cfg: CFG = config["GLOBAL"]
+        self.opts: CFG = config[self.name]
+
+        self.outpath: Path = self.opts.get(
+            "OUTPUT",
+            self.global_cfg["OUTPUT"] / self.name,
+        )
+        if not self.outpath.is_absolute():
+            self.outpath = self.global_cfg["OUTPUT"] / self.outpath
+        if not self.outpath.exists():
+            self.outpath.mkdir(parents=True)
+
+        self.log: Logger = self.global_cfg["LOG"]
+        self.log.debug(f"Running {self.name} with opts: {self.opts}")
+
+        self.configpath: Path = self.outpath / f"{self.name}.toml"
+        self.plotpath: Path = self.outpath / "plots"
+        if not self.plotpath.exists():
+            self.plotpath.mkdir(parents=True)
+
+        self.log.debug(f"Writing {self.name} opts to {self.configpath}")
+        with self.configpath.open("w", encoding="utf-8") as io:
+            _ = toml.dump({self.name: self.opts}, io)
+
+        is_valid = self.validate()
+        if not is_valid:
+            msg = f"Invalid {self.name} configuration"
+            raise ValueError(msg)
+
+        self.force: bool = self.global_cfg["FORCE"] or self.opts["FORCE"]
+
+        self.analyses: dict[str, Callable[[Self, CFG], None]] = getattr(
+            analyses,
+            self.name + "Analysis",
+        ).ANALYSES
+
+        self.callbacks: dict[str, dict[str, Callable[[Self], None]]] = self.opts[
+            "CALLBACKS"
+        ]
+        # Bind the callback function to self
+        # raw_callbacks: Callable[[Self], None] = self.opts["CALLBACKS"]
+        # self.callbacks: Callable[[Self], None] = MethodType(raw_callbacks, self)
+
+    @override
+    def __str__(self) -> str:
+        lines = [
+            f"{self.name}:",
+            f"    Is Setup: {self.is_setup}",
+            f"    Has Run: {self.has_run}",
+            f"    Global Config: {self.global_cfg}",
+            f"    {self.name} Options: {self.opts}",
+        ]
+        return "\n".join(lines)
+
+    @callback
+    def validate(self) -> bool:
+        for step in self.prev:
+            if self.global_cfg["RESULTS"].get(step) is None:
+                self.log.error(f"Attempting to run {self.name} before {step}")
+                return False
+        for requirement in self.required:
+            key = requirement.name.upper()
+            opt = self.opts.get(key)
+            if opt is None:
+                self.log.error(
+                    f"{self.name} is missing required option: {key}: {requirement.description}",
+                )
+                return False
+            ok, result = requirement.validate(opt, self.global_cfg, self.opts)
+            if not ok:
+                self.log.error(f"Invalid `{key}`=`{opt}`: {result}")
+                return False
+            self.opts[key] = result
+
+        for requirement in self.optional:
+            key = requirement.name.upper()
+            opt = self.opts.get(key)
+            if opt is None:
+                opt = requirement.default
+            if opt is not None:
+                ok, result = requirement.validate(opt, self.global_cfg, self.opts)
+                if not ok:
+                    self.log.error(f"Invalid `{key}`=`{opt}`: {result}")
+                    return False
+            else:
+                result = None
+            self.opts[key] = result
+        return True
+
+    def tqdm(
+        self,
+        lst: "Iterable[Any]",
+        *args,
+        **kwargs,
+    ):  # TODO: Allow custom text to be passed to stop prints / logs overwriting bar.
+        return lst if not self.global_cfg["VERBOSE"] else tqdm(lst, *args, **kwargs)
+
+    @abstractmethod
+    def _is_completed(self) -> bool:
+        return False
+
+    @abstractmethod
+    def _load(self) -> "RequirementReturn[None]":
+        return True, None
+
+    @abstractmethod
+    def _setup(self) -> "RequirementReturn[None]":
+        return True, None
+
+    @callback
+    def setup(self) -> "RequirementReturn[None]":
+        self.log.info(f"Setting up {self.name}")
+        try:
+            ok, result = self._setup()
+        except Exception:
+            ok = False
+            result = traceback.format_exc()
+            self.log.exception(f"Error setting up {self.name}: {result}")
+        if not ok:
+            return ok, f"Error setting up {self.name}: {result}"
+        self.is_setup = True
+        return True, None
+
+    @abstractmethod
+    def _run(self) -> "RequirementReturn[None]":
+        return True, None
+
+    @callback
+    def run(self) -> "RequirementReturn[None]":
+        self.log.info(f"Running {self.name}")
+        should_run = not self._is_completed()
+        if self.force:
+            self.log.debug(f"Forced running of {self.name}")
+            should_run = True
+        if should_run:
+            try:
+                ok, result = self._run()
+            except Exception:
+                ok = False
+                result = traceback.format_exc()
+                self.log.exception(f"Error running {self.name}: {result}")
+        else:
+            self.log.info(f"{self.name} already completed, loading previous result")
+            try:
+                ok, result = self._load()
+            except Exception:
+                ok = False
+                result = traceback.format_exc()
+                self.log.exception(f"Error loading {self.name}: {result}")
+        if not ok:
+            return ok, f"Error running {self.name}: {result}"
+        self.has_run = True
+        return True, None
+
+    @abstractmethod
+    def _result(self) -> "RequirementReturn[None]":
+        return True, None
+
+    @callback
+    def result(self) -> "RequirementReturn[CFG]":
+        self.log.info(f"Storing {self.name} results")
+        try:
+            ok, result = self._result()
+            self.global_cfg["RESULTS"][self.name] = self
+            self.orig_config["GLOBAL"] = self.global_cfg
+            self.orig_config[self.name] = self.opts
+        except Exception:
+            ok = "Exception"  # We handled the exception here so no need to log the error later
+            result = traceback.format_exc()
+            self.log.exception(f"Error getting results of {self.name}: {result}")
+        self.log.info(f"Finished running {self.name}")
+        if not ok:
+            return False, f"Error getting results of {self.name}: {result}"
+        return True, self.orig_config
+
+    @abstractmethod
+    def _analyse(self) -> "RequirementReturn[None]":
+        return True, None
+
+    @callback
+    def analyse(self) -> "RequirementReturn[None]":
+        self.log.info(f"Analysing {self.name}")
+        try:
+            ok, result = self._analyse()
+        except Exception:
+            ok = "Exception"  # We handled the exception here so no need to log the error later
+            result = traceback.format_exc()
+            self.log.exception(f"Error analysing {self.name}: {result}")
+            return False, result
+        if not ok:
+            return False, f"Error analysing {self.name}: {result}"
+        for key, opts in self.opts["ANALYSIS"].items():
+            fn = self.analyses.get(key)
+            if fn is None:
+                self.log.error(f"Unknown analysis function: {key}")
+            else:
+                try:
+                    fn(self, opts)
+                    ok = True
+                except Exception:
+                    ok = "Exception"  # We handled the exception here so no need to log the error later
+                    result = traceback.format_exc()
+                    self.log.exception(f"Error analysing {self.name}: {result}")
+                    return False, result
+                if not ok:
+                    return False, f"Error analysing {self.name}: {result}"
+        return True, None
+
+
+from suPAErnova.steps.pae import PAEStep
+from suPAErnova.steps.data import DATAStep
+from suPAErnova.steps.pae.tf_pae import TF_PAEStep
+
+__all__ = ["DATAStep", "PAEStep", "Step", "TF_PAEStep"]
