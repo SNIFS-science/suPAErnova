@@ -15,6 +15,7 @@ import click
 from pydantic import ValidationError
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+from suPAErnova.steps import SNPAEStep
 from suPAErnova.configs import SNPAEConfig
 from suPAErnova.logging import setup_logging
 from suPAErnova.configs.input import InputConfig
@@ -123,6 +124,7 @@ def main(
             )
 
             # Propagate global and paths to steps
+            SNPAEStep.register_steps()
             for step, step_config in StepConfig.steps.items():
                 if step in user_config:
                     user_config[step] = step_config.from_config({

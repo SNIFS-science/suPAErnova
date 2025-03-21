@@ -1,5 +1,4 @@
 # Copyright 2025 Patrick Armstrong
-"""User-defined input configuration which controls the behaviour of SuPAErnova."""
 
 from typing import Self
 
@@ -12,11 +11,6 @@ from suPAErnova.configs.steps.pae import PAEStepConfig  # noqa: TC001
 from suPAErnova.configs.steps.data import DataStepConfig  # noqa: TC001
 from suPAErnova.configs.steps.nflow import NFlowStepConfig  # noqa: TC001
 from suPAErnova.configs.steps.posterior import PosteriorStepConfig  # noqa: TC001
-
-from suPAErnova.steps.data import DataStep
-from suPAErnova.steps.pae import PAEStep
-from suPAErnova.steps.nflow import NFlowStep
-from suPAErnova.steps.posterior import PosteriorStep
 
 
 class InputConfig(SNPAEConfig):

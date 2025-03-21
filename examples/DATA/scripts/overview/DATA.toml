@@ -25,8 +25,8 @@
     cosmological_model = "WMAP7"
 
     # The absolute path to an existing SALT2/3 model, or the name of an existing SNCosmo SALT2/3 model.
-    #   Defaults to salt3
-    salt_model = "salt3"
+    #   Defaults to salt2
+    salt_model = "salt2"
 
     # Minimum phase for spectral data, relative to peak. Spectral data earlier than this phase will be cut.
     #   Defaults to -10

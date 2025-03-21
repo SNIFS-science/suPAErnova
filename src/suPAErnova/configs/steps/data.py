@@ -32,7 +32,7 @@ class DataStepConfig(StepConfig):
 
     # Optional
     cosmological_model: str = "WMAP7"
-    salt_model: "str | Path" = "salt3"
+    salt_model: "str | Path" = "salt2"
     min_phase: float = -10
     max_phase: float = 40
     train_frac: Annotated[float, Field(ge=0, le=1)] = 0.75
@@ -80,7 +80,7 @@ class DataStepConfig(StepConfig):
     @classmethod
     def validate_salt_model(cls, value: str) -> str:
         if ("salt2" not in value) and ("salt3" not in value):
-            err = f"`salt_model` is {value} but does not appear to be a salt2 or salt3 model"
+            err = f'`salt_model` is {value} but does not appear to be a salt2 or salt3 model, as it does not contain the string `"salt2"` or `"salt3"'
             raise ValueError(err)
         return value
 
