@@ -188,12 +188,14 @@ class DataStep(SNPAEStep[DataStepConfig]):
     @override
     def _load(self) -> None:
         # Load SNe DataFrames
+        self.log.debug(f"Loading SNe dataframe from {self.out_sne}")
         self.sne = pd.read_pickle(self.out_sne)
 
         # Calculate data dimensions
         self.get_dims()
         # Load data from files
         # Open the file, read each key into a dictionary, then close the file
+        self.log.debug(f"Loading data arrays from {self.out_data}")
         data = {}
         with np.load(self.out_data, allow_pickle=True) as io:
             for k, v in io.items():
@@ -201,6 +203,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
         self.data = SNPAEData.model_validate(data)
 
         # Load in training and testing data
+        self.log.debug(f"Loading training data arrays from {self.out_train}")
         self.train_data = []
         for train_data in self.out_train.iterdir():
             if train_data.is_file():
@@ -209,6 +212,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
                     for k, v in io.items():
                         data[k] = v
                     self.train_data.append(SNPAEData.model_validate(data))
+
+        self.log.debug(f"Loading testing data arrays from {self.out_test}")
         self.test_data = []
         for test_data in self.out_test.iterdir():
             if test_data.is_file():
@@ -367,6 +372,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
         self.sne = sne
 
     def calculate_salt_flux(self) -> None:
+        self.log.debug("Calculating SALT fluxes")
+
         def get_salt_flux(
             wavelength: "npt.NDArray[np.float32]",
             tobs: float = 0.0,
@@ -402,7 +409,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
                 )
 
     def get_dims(self) -> None:
-        # --- Get Dimensions ---
+        self.log.debug("Calculating data dimensions")
         self.sn_dim = len(self.sne)
         self.log.debug(f"Number of SNe: {self.sn_dim}")
 
@@ -423,13 +430,14 @@ class DataStep(SNPAEStep[DataStepConfig]):
         self.log.debug(f"Length of wavelength grid: {self.wl_dim}")
 
     def prepare_data_arrays(self) -> None:
+        self.log.debug("Preparing data arrays")
         # Each element of data is a 3D Array of shape (sn_dim x phase_dim x data_dim) where:
         #   sn_dim = Number of SNe
         #   phase_dim = Maximum number of observations for any given SN (padded if needed)
         #   data_dim = Length of datatype
 
         # Allows for filling an array with padding
-        phase_axis = nspectra_per_sn.copy()
+        phase_axis = self.nspectra_per_sn.copy()
         phase_axis.fill(self.phase_dim)
 
         # --- Get Parameters ---
@@ -462,7 +470,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
         data["ind"] = fill_rows(np.array(range(self.sn_dim)))
 
         # Number of spectra per SNe
-        data["nspectra"] = fill_rows(nspectra_per_sn)
+        data["nspectra"] = fill_rows(self.nspectra_per_sn)
 
         # Get SNe parameters
         sne_params = {
