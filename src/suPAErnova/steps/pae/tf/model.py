@@ -18,11 +18,10 @@ if TYPE_CHECKING:
     DeltaAvLatent = tf.Tensor
     DeltaAmpLatent = tf.Tensor
     DeltaPeakLatent = tf.Tensor
-    ZLatent = tf.Tensor
-    Latent = DeltaAvLatent | DeltaAmpLatent | DeltaPeakLatent | ZLatent
+    ZLatents = tf.Tensor
 
     EncodeInputs = tuple[AmplitudeInput, PhaseInput, MaskInput]
-    EncodeOutputs = tuple[Latent, ...]
+    EncodeOutputs = tf.Tensor
 
     DecodeInputs = tuple[EncodeOutputs, PhaseInput, MaskInput]
     DecodeOutputs = tf.Tensor
@@ -124,7 +123,7 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # Project from nspec_dim dimensions into output dimensions
         self.project_output_layer = ks.layers.Dense(
-            self.n_zs + self.n_physical,
+            self.n_physical + self.n_zs,
             kernel_regularizer=self.kernel_regulariser,
             use_bias=False,
         )
@@ -135,6 +134,8 @@ class TFPAEEncoder(ks.layers.Layer):
         tf.ensure_shape(input_amp, self.input_amp_spec)
         tf.ensure_shape(input_phase, self.input_phase_spec)
         tf.ensure_shape(input_mask, self.input_mask_spec)
+
+        is_kept = tf.reduce_min(input_mask, axis=-1)
 
         # Create initial input layer
         if self.architecture == "dense":
@@ -157,10 +158,26 @@ class TFPAEEncoder(ks.layers.Layer):
         # Project to nspec_dim
         x = self.project_nspec_layer(x)
 
-        # Project to output dimensions (n_zs + n_physical)
+        # Project to output dimensions (n_physical + n_zs)
         x = self.project_output_layer(x)
 
-        return ()
+        outputs: EncodeOutputs = tf.reduce_sum(x * is_kept, axis=-2) / tf.maximum(
+            tf.reduce_sum(is_kept, axis=-2), y=1
+        )
+
+        if self.n_physical > 0:
+            delta_peak: DeltaPeakLatent = outputs[..., 0:1]
+            delta_amp: DeltaAmpLatent = outputs[..., 1:2]
+            delta_av: DeltaAvLatent = outputs[..., 2:3]
+            zs: ZLatents = outputs[..., 3:]
+
+            # Training Stages
+
+            # Normalisation
+
+            outputs = ks.layers.concatenate([delta_peak, delta_amp, delta_av, zs])
+
+        return outputs
 
 
 @final
