@@ -17,7 +17,7 @@ from suPAErnova.steps import DATAStep, TF_PAEStep
 from suPAErnova.utils import suPAErnova_logging as log
 
 if TYPE_CHECKING:
-    from suPAErnova.steps import Step
+    from suPAErnova.steps import Step_contra
     from suPAErnova.config.requirements import RequirementReturn
     from suPAErnova.utils.suPAErnova_types import CFG, INPUT
 
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 #
 
 
-STEPS: dict[str, type["Step"]] = {"DATA": DATAStep, "TF_PAE": TF_PAEStep}
+STEPS: dict[str, type["Step_contra"]] = {"DATA": DATAStep, "TF_PAE": TF_PAEStep}
 
 
 #

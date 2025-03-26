@@ -21,22 +21,22 @@ from suPAErnova.configs.steps import StepConfig
 
 
 class DataStepConfig(StepConfig):
-    # Class Vars
+    # --- Class Variables ---
     name: ClassVar["str"] = "data"
 
-    # Required
+    # --- Required ---
     data_dir: "Path"
     meta: "Path"
     idr: "Path"
     mask: "Path"
 
-    # Optional
+    # --- Optional ---
     cosmological_model: str = "WMAP7"
     salt_model: "str | Path" = "salt2"
     min_phase: float = -10
     max_phase: float = 40
     train_frac: Annotated[float, Field(ge=0, le=1)] = 0.75
-    seed: PositiveInt
+    seed: PositiveInt = 12345
 
     @model_validator(mode="after")
     def validate_paths(self) -> Self:

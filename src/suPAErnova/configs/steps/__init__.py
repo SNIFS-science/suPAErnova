@@ -1,5 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
+from abc import abstractmethod
 from copy import deepcopy
 from typing import Any, ClassVar, cast, override
 
@@ -11,7 +12,7 @@ class StepConfig(SNPAEConfig):
     # Class Variables
     steps: ClassVar["dict[str, type[StepConfig]]"] = {}
     required_steps: ClassVar["list[str]"] = []
-    name: ClassVar["str"] = "step"
+    name: ClassVar["str"]
 
     @classmethod
     def register_step(cls) -> None:

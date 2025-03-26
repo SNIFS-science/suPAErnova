@@ -1,58 +1,18 @@
 [data]
-    # === Required Keys ===
-
-    # Path to directory containing data.
-    #   Can be absolute or relative to the base path.
+    # Required
     data_dir = "../../../suPAErnova_data/"
+    idr      = "IDR_eTmax.txt"
+    mask     = "mask_info_wmin_wmax.txt"
+    meta     = "meta.csv"
 
-    # Metadata CSV containing SN names and SALT fit parameters.
-    #   Can be absolute or relative to the data path.
-    meta = "meta.csv"
-
-    # TXT file containing additional SALT fit parameters.
-    #   Can be absolute or relative to the data path.
-    idr = "IDR_eTmax.txt"
-
-    # TXT file containing a mask of bad spectra / wavelength ranges.
-    #   Can be absolute or relative to the data path.
-    mask = "mask_info_wmin_wmax.txt"
-
-    # === Optional Keys ===
-
-    # Which assumed cosmology to use when running SALT models.
-    #   Available cosmological can be found [here](https://docs.astropy.org/en/stable/cosmology/realizations.html)
-    #   Defaults to WMAP7
+    # Optional
     cosmological_model = "WMAP7"
+    max_phase          = 40
+    min_phase          = -10
+    salt_model         = "salt2"
+    seed               = 12345
+    train_frac         = 0.75
 
-    # The absolute path to an existing SALT2/3 model, or the name of an existing SNCosmo SALT2/3 model.
-    #   Defaults to salt2
-    salt_model = "salt2"
-
-    # Minimum phase for spectral data, relative to peak. Spectral data earlier than this phase will be cut.
-    #   Defaults to -10
-    min_phase = -10
-
-    # Maximum phase for spectral data, relative to peak. Spectral data later than this phase will be cut.
-    #   Defaults to 40
-    max_phase = 40
-
-    # The fraction of data to be used for training, with the rest of the data going to testing and validation.
-    #   Defaults to 0.75
-    train_frac = 0.75
-
-    # The seed used throughout data preperation, in particular for randomly splitting the data into training, testing, and validation bins.
-    #   Defaults to 12345
-    seed = 12345
-
-    # === Analysis Keys ===
-    [data.analysis]
-        # Which spectra to plot
-        #    str: The name of a single spectrum to plot
-        #    list[str]: Names of each spectrum to plot
-        #    true: Plot every spectrum
-        plot_spectra = true
-
-    # === Callbacks ===
     [data.callbacks]
         analyse                   = "callbacks/analyse.py"
         calculate_laser_line_mask = "callbacks/calculate_laser_line_mask.py"

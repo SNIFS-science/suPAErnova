@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 class SNPAEData(BaseModel):
-    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True)  # pyright: ignore[reportIncompatibleVariableOverride]
+    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
 
     ind: npt.NDArray[np.int32]
     nspectra: npt.NDArray[np.int32]
@@ -63,6 +63,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
         self.force: bool
         self.verbose: bool
         super().__init__(config)
+
+        # --- Previous Step Variables ---
 
         # --- Config Variables ---
         # Required
@@ -104,11 +106,13 @@ class DataStep(SNPAEStep[DataStepConfig]):
 
         # Data Dimensions
         self.sn_dim: int
-        self.phase_dim: int
+        self.nspec_dim: int
         self.wl_dim: int
 
     @override
     def _setup(self) -> None:
+        # --- Previous Step Variables ---
+
         # --- Config Variables ---
         # Required
         self.data_dir = self.options.data_dir
@@ -255,6 +259,10 @@ class DataStep(SNPAEStep[DataStepConfig]):
     @override
     def _analyse(self) -> None:
         pass
+
+    #
+    # === DataStep Specific Functions ===
+    #
 
     def load_sne(self) -> None:
         self.log.debug(f"Loading data from `meta` file: {self.meta}")
@@ -417,9 +425,9 @@ class DataStep(SNPAEStep[DataStepConfig]):
         self.nspectra_per_sn = np.array(
             [len(spectra) for spectra in self.sne["spectra"]],
         )
-        self.phase_dim = self.nspectra_per_sn.max()
+        self.nspec_dim = self.nspectra_per_sn.max()
         self.log.debug(
-            f"Maximum number of observations for any given SN: {self.phase_dim}",
+            f"Maximum number of observations for any given SN: {self.nspec_dim}",
         )
 
         # Wavelength grid
@@ -431,40 +439,40 @@ class DataStep(SNPAEStep[DataStepConfig]):
 
     def prepare_data_arrays(self) -> None:
         self.log.debug("Preparing data arrays")
-        # Each element of data is a 3D Array of shape (sn_dim x phase_dim x data_dim) where:
+        # Each element of data is a 3D Array of shape (sn_dim x nspec_dim x data_dim) where:
         #   sn_dim = Number of SNe
-        #   phase_dim = Maximum number of observations for any given SN (padded if needed)
+        #   nspec_dim = Maximum number of observations for any given SN (padded if needed)
         #   data_dim = Length of datatype
 
         # Allows for filling an array with padding
         phase_axis = self.nspectra_per_sn.copy()
-        phase_axis.fill(self.phase_dim)
+        phase_axis.fill(self.nspec_dim)
 
         # --- Get Parameters ---
         data = {}
 
-        # Given an array of shape sn_dim by N <= phase_dim
-        # Create an array of shape sn_dim by phase_dim, padding if needed
+        # Given an array of shape sn_dim by N <= nspec_dim
+        # Create an array of shape sn_dim by nspec_dim, padding if needed
         def pad(
             arr: "Iterable[Sequence[T | npt.NDArray[T]]]",
             padding: "T | npt.NDArray[T]",
         ) -> "npt.NDArray[T]":
             if isinstance(padding, np.ndarray):
                 padded_arr: npt.NDArray[T] = np.full(
-                    (self.sn_dim, self.phase_dim, *padding.shape),
+                    (self.sn_dim, self.nspec_dim, *padding.shape),
                     padding,
                 )
             else:
-                padded_arr = np.full((self.sn_dim, self.phase_dim), padding)
+                padded_arr = np.full((self.sn_dim, self.nspec_dim), padding)
             for i, row in enumerate(arr):
                 row_length = len(row)
                 padded_arr[i, :row_length] = row
             return padded_arr
 
         # Given a list of value-per-row of length sn_dim
-        # Fill each row with phase_dim repeats of that row's value
+        # Fill each row with nspec_dim repeats of that row's value
         def fill_rows(values: "npt.NDArray[T]") -> "npt.NDArray[T]":
-            return np.repeat(values, phase_axis).reshape((self.sn_dim, self.phase_dim))
+            return np.repeat(values, phase_axis).reshape((self.sn_dim, self.nspec_dim))
 
         # Index of each SNe
         data["ind"] = fill_rows(np.array(range(self.sn_dim)))

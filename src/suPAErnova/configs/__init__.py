@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import TYPE_CHECKING, Self
+from typing import Any, Self, Protocol
 from logging import Logger  # noqa: TC003
 from pathlib import Path
 from collections.abc import Callable
@@ -12,12 +12,32 @@ from suPAErnova.logging import setup_logging
 from suPAErnova.configs.paths import PathConfig  # noqa: TC001
 from suPAErnova.configs.config import GlobalConfig  # noqa: TC001
 
-if TYPE_CHECKING:
-    from typing import Any
+
+class CallbackFunc[Instance: "Any", Returns](Protocol):
+    def __call__(_self, self: Instance, *args: "Any", **kwargs: "Any") -> Returns: ...
+
+
+def callback[Instance: "Any", Returns](
+    fn: CallbackFunc[Instance, Returns],
+) -> "Callable[..., Returns]":
+    def wrapper(self: "Instance", *args: "Any", **kwargs: "Any") -> "Returns":
+        callbacks: dict[str, Callable[[Instance], None]] = self.options.callbacks.get(
+            fn.__name__.lower(), {}
+        )
+        pre_callback = callbacks.get("pre")
+        if pre_callback is not None:
+            pre_callback(self)
+        rtn = fn(self, *args, **kwargs)
+        post_callback = callbacks.get("post")
+        if post_callback is not None:
+            post_callback(self)
+        return rtn
+
+    return wrapper
 
 
 class SNPAEConfig(BaseModel):
-    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True)  # pyright: ignore[reportIncompatibleVariableOverride]
+    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
 
     # Required
     config: "GlobalConfig"
@@ -25,10 +45,10 @@ class SNPAEConfig(BaseModel):
     log: "Logger"
 
     # Optional
-    callbacks: dict[str, str | dict[str, Callable[[Self], None]]] = {}
+    callbacks: dict[str, str | dict[str, "Callable[[Any], None]"]] = {}
 
     @model_validator(mode="after")
-    def validate_callbacks(self) -> Self:
+    def validate_callbacks(self) -> "Self":
         for fn, callback in self.callbacks.items():
             if isinstance(callback, str):
                 fn_callbacks = {}
@@ -61,7 +81,7 @@ class SNPAEConfig(BaseModel):
     def from_config(
         cls,
         input_config: dict[str, "Any"],
-    ) -> Self:
+    ) -> "Self":
         config = {**cls.default_config(input_config), **input_config}
         cfg = cls.model_validate(config)
         cfg.save()

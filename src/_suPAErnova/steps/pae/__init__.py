@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, TypeVar, ClassVar, override
 
-from suPAErnova.steps import Step, callback
+from suPAErnova.steps import Step_contra, callback
 from suPAErnova.config.pae import (
     prev,
     optional,
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     M = TypeVar("M")
 
 
-class PAEStep(Step):
+class PAEStep(Step_contra):
     required = required
     optional = optional
     prev = prev

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, cast, final, override
 import numpy as np
 import pandas as pd
 
-from suPAErnova.steps import Step, callback
+from suPAErnova.steps import callback
 from suPAErnova.config.data import optional, required
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 @final
-class DATAStep(Step):
+class DATAStep(Step_contra):
     required = required
     optional = optional
 

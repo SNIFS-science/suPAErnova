@@ -1,46 +1,26 @@
 # Copyright 2025 Patrick Armstrong
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, ClassVar
 from pathlib import Path
 import pkgutil
 import importlib
 
-if TYPE_CHECKING:
-    from typing import TypeVar
-    from logging import Logger
-    from collections.abc import Callable
+from suPAErnova.configs import callback
 
-    from suPAErnova.configs import SNPAEConfig
+if TYPE_CHECKING:
+    from typing import Any
+    from logging import Logger
+
     from suPAErnova.configs.paths import PathConfig
+    from suPAErnova.configs.steps import StepConfig
     from suPAErnova.configs.config import GlobalConfig
 
-    Step = TypeVar("Step", bound="SNPAEStep[Any]")
-    StepReturn = TypeVar("StepReturn")
 
-
-def callback(fn: "Callable[[Step], StepReturn]"):
-    def wrapper(self: "Step") -> "StepReturn":
-        callbacks = cast(
-            "dict[str, Callable[[Step], None]]",
-            self.options.callbacks.get(fn.__name__.lower(), {}),
-        )
-        pre_callback = callbacks.get("pre")
-        if pre_callback is not None:
-            pre_callback(self)
-        rtn = fn(self)
-        post_callback = callbacks.get("post")
-        if post_callback is not None:
-            post_callback(self)
-        return rtn
-
-    return wrapper
-
-
-class SNPAEStep[Config: "SNPAEConfig"]:
+class SNPAEStep[Config: "StepConfig"]:
     # Class Variables
     steps: ClassVar["dict[str, type[SNPAEStep[Any]]]"] = {}
-    name: ClassVar["str"] = "step"
+    name: ClassVar["str"]
 
     @classmethod
     def register_step(cls) -> None:
@@ -53,6 +33,10 @@ class SNPAEStep[Config: "SNPAEConfig"]:
                 importlib.import_module(f"{__name__}.{module}")
 
     def __init__(self, config: "Config") -> None:
+        # Class Variables
+        self.__class__.name = config.__class__.name
+
+        # Init Variables
         self.options: Config = config
         self.config: GlobalConfig = config.config
         self.paths: PathConfig = config.paths
@@ -61,13 +45,13 @@ class SNPAEStep[Config: "SNPAEConfig"]:
         self.verbose: bool = self.config.verbose
 
     @abstractmethod
-    def _setup(self) -> None:
+    def _setup(self, *_args: "Any", **_kwargs: "Any") -> None:
         pass
 
     @callback
-    def setup(self) -> None:
+    def setup(self, *args: "Any", **kwargs: "Any") -> None:
         self.log.info(f"Setting up {self.__class__.__name__}")
-        self._setup()
+        self._setup(*args, **kwargs)
         self.log.info(f"Finished setting up {self.__class__.__name__}")
 
     @abstractmethod

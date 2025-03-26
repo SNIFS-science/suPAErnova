@@ -88,7 +88,7 @@ class TF_PAEModel(ks.Model, PAEModel):
         if self.layer_type == "DENSE":
             x = layers.concatenate([input_amp, input_phase])
         else:
-            x = input_amp
+            x = tf.expand_dims(input_amp, axis=-1)
 
         for i, n in enumerate(self.encode_dims[:-1]):
             if self.layer_type == "DENSE":
@@ -99,8 +99,6 @@ class TF_PAEModel(ks.Model, PAEModel):
                     name=f"Latent_{i + 1}",
                 )(x)
             else:
-                if i == 0:
-                    x = tf.expand_dims(x, axis=-1)
                 x = layers.Conv2D(
                     n,
                     kernel_size=(1, self.kernel_size),
