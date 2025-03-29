@@ -1,15 +1,12 @@
 # Copyright 2025 Patrick Armstrong
-"""Global configurations shared by all steps in SuPAErnova."""
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import (
     BaseModel,
-    StrictBool,  # noqa: TC002
+    JsonValue,
+    StrictBool,
 )
-
-if TYPE_CHECKING:
-    from pydantic import JsonValue
 
 
 class GlobalConfig(BaseModel):

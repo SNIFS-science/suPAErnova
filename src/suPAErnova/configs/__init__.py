@@ -1,7 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 
 from typing import Any, Self, Protocol
-from logging import Logger  # noqa: TC003
+from logging import Logger
 from pathlib import Path
 from collections.abc import Callable
 
@@ -9,8 +9,8 @@ import toml
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from suPAErnova.logging import setup_logging
-from suPAErnova.configs.paths import PathConfig  # noqa: TC001
-from suPAErnova.configs.config import GlobalConfig  # noqa: TC001
+from suPAErnova.configs.paths import PathConfig
+from suPAErnova.configs.config import GlobalConfig
 
 
 class CallbackFunc[Instance: "Any", Returns](Protocol):

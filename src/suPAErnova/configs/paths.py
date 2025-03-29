@@ -1,17 +1,13 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from pathlib import Path
 
 from pydantic import (
     BaseModel,
-    DirectoryPath,  # noqa: TC002
+    JsonValue,
+    DirectoryPath,
 )
-
-if TYPE_CHECKING:
-    from pydantic import (
-        JsonValue,
-    )
 
 
 class PathConfig(BaseModel):

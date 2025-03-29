@@ -1,5 +1,4 @@
 # Copyright 2025 Patrick Armstrong
-"""Logging configuration used by SuPAErnova."""
 
 import sys
 from typing import TYPE_CHECKING
@@ -32,7 +31,7 @@ def setup_logging(
         "debug=8;info=green;warning=yellow;error=red,bold;critical=red,inverse"
     )
 
-    # --- Steam Handler ---
+    # --- Stream Handler ---
     # Set level and formatting
     stream_level = logging.DEBUG if verbose else logging.INFO
     stream_fmt = coloredlogs.ColoredFormatter(

@@ -1,15 +1,18 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Literal, ClassVar
+from typing import Any, Literal, ClassVar, get_args
 
 from pydantic import model_validator
 
 from suPAErnova.configs.steps import StepConfig
 from suPAErnova.configs.steps.data import DataStepConfig
-from suPAErnova.configs.steps.pae.model import PAEModelConfig  # noqa: TC001
+from suPAErnova.configs.steps.pae.tf.model import TFPAEModelConfig
+from suPAErnova.configs.steps.pae.tch.model import TCHPAEModelConfig
 
 TFBackend = Literal["tf", "tensorflow"]
 TCHBackend = Literal["tch", "torch"]
 Backend = TFBackend | TCHBackend
+
+ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
 
 
 class PAEStepConfig(StepConfig):
@@ -19,7 +22,7 @@ class PAEStepConfig(StepConfig):
 
     # --- Required ---
     backend: "Backend"
-    pae_model_config: "PAEModelConfig"
+    model: "ModelConfig"
 
     # --- Optional ---
 
@@ -32,8 +35,12 @@ class PAEStepConfig(StepConfig):
                 "config": data.get("config"),
                 "log": data.get("log"),
             }
-            data["pae_model_config"] = {**model_config, **data.get("model", {})}
+            pae_model_config = {**model_config, **data.get("model", {})}
             data.pop("model")
+            if data["backend"] in get_args(TFBackend):
+                data["model"] = TFPAEModelConfig.from_config(pae_model_config)
+            else:
+                data["model"] = TCHPAEModelConfig.from_config(pae_model_config)
         return data
 
 

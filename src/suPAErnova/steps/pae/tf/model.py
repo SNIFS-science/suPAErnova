@@ -1,16 +1,15 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import TYPE_CHECKING, Any, Literal, cast, final, override
+from typing import TYPE_CHECKING, Any, cast, final, override
 
 import keras
-from pydantic import (
-    BaseModel,
-    PositiveInt,  # noqa: TC002
-)
 import tensorflow as tf
 from tensorflow import keras as ks
 
 if TYPE_CHECKING:
+    from suPAErnova.steps.pae.model import PAEModel
+    from suPAErnova.configs.steps.pae.tf.model import TFPAEModelConfig
+
     AmplitudeInput = tf.Tensor
     PhaseInput = tf.Tensor
     MaskInput = tf.Tensor
@@ -18,7 +17,7 @@ if TYPE_CHECKING:
     DeltaAvLatent = tf.Tensor
     DeltaAmpLatent = tf.Tensor
     DeltaPeakLatent = tf.Tensor
-    ZLatents = tf.Tensor
+    ZsLatent = tf.Tensor
 
     EncodeInputs = tuple[AmplitudeInput, PhaseInput, MaskInput]
     EncodeOutputs = tf.Tensor
@@ -26,40 +25,54 @@ if TYPE_CHECKING:
     DecodeInputs = tuple[EncodeOutputs, PhaseInput, MaskInput]
     DecodeOutputs = tf.Tensor
 
-
-class TFPAEModelConfig(BaseModel):
-    # Required
-    architecture: Literal["dense", "convolutional"]
-    encode_dims: list["PositiveInt"]
-
-    nspec_dim: "PositiveInt"
-    wl_dim: "PositiveInt"
-
-    # Optional
-    phase_dim: "PositiveInt" = 1
+    from tensorflow._aliases import TensorCompatible
 
 
 @final
-@keras.saving.register_keras_serializable()
+@keras.saving.register_keras_serializable("SuPAErnova")
 class TFPAEEncoder(ks.layers.Layer):
     def __init__(
         self,
-        config: TFPAEModelConfig,
+        config: "PAEModel",
         name: str = "encoder",
         **kwargs: Any,
     ) -> None:
         super().__init__(name=name, **kwargs)
 
-        self.architecture = config.architecture
+        self.options = cast("TFPAEModelConfig", config.options)
+
+        # --- Config Params ---
+        self.architecture = self.options.architecture
 
         self.nspec_dim = config.nspec_dim
         self.wl_dim = config.wl_dim
         self.phase_dim = config.phase_dim
 
-        self.encode_dims = config.encode_dims
+        self.encode_dims = self.options.encode_dims
         self.n_encode_dims = len(self.encode_dims)
 
-        # --- TensorSpecs ---
+        self.activation = self.options.activation_fn
+        self.kernel_regulariser = self.options.kernel_regulariser_cls(
+            self.options.kernel_regulariser_penalty
+        )
+
+        self.dropout = self.options.dropout
+        self.batch_normalisation = self.options.batch_normalisation
+
+        self.n_physical = 3 if self.options.physical_latents else 0
+        self.n_zs = self.options.n_z_latents
+        self.n_latents = self.n_physical + self.n_zs
+
+        # --- Training Params ---
+        self.training: bool
+        self.train_stage: int
+        self.train_stage_mask: tf.Tensor
+        self.moving_means: tf.Tensor
+
+        self.gen_tensor_specs()
+        self.gen_layers()
+
+    def gen_tensor_specs(self) -> None:
         self.input_amp_spec = tf.TensorSpec(
             shape=(self.nspec_dim, self.wl_dim), dtype=tf.float32, name="amplitude"
         )
@@ -69,15 +82,10 @@ class TFPAEEncoder(ks.layers.Layer):
         self.input_mask_spec = tf.TensorSpec(
             shape=(self.nspec_dim, self.wl_dim), dtype=tf.int32, name="mask"
         )
-        self.input_spec: tuple[tf.TensorSpec, tf.TensorSpec, tf.TensorSpec] = (
-            self.input_amp_spec,
-            self.input_phase_spec,
-            self.input_mask_spec,
-        )
 
-        # --- Layers ---
+    def gen_layers(self) -> None:
         # Project from input layer dimensions into intermediate dimensions
-        self.projection_layers: list[ks.layers.Layer] = []
+        self.projection_layers: list[ks.layers.Layer[tf.Tensor, tf.Tensor]] = []
         for i in range(self.n_encode_dims):
             n = self.encode_dims[i]
             if self.architecture == "dense":
@@ -123,10 +131,21 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # Project from nspec_dim dimensions into output dimensions
         self.project_output_layer = ks.layers.Dense(
-            self.n_physical + self.n_zs,
+            self.n_latents,
             kernel_regularizer=self.kernel_regulariser,
             use_bias=False,
         )
+
+    def setup(self, *, training: bool, train_stage: int) -> None:
+        self.training = training
+        self.train_stage = train_stage
+
+        # Mask latents which aren't being trained
+        # The latents are ordered by training stage
+        # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅
+        masked_latents = tf.zeros(self.n_latents - self.train_stage)
+        unmasked_latents = tf.ones(self.train_stage)
+        self.train_stage_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
 
     @override
     def call(self, inputs: "EncodeInputs") -> "EncodeOutputs":
@@ -134,8 +153,6 @@ class TFPAEEncoder(ks.layers.Layer):
         tf.ensure_shape(input_amp, self.input_amp_spec)
         tf.ensure_shape(input_phase, self.input_phase_spec)
         tf.ensure_shape(input_mask, self.input_mask_spec)
-
-        is_kept = tf.reduce_min(input_mask, axis=-1)
 
         # Create initial input layer
         if self.architecture == "dense":
@@ -152,39 +169,41 @@ class TFPAEEncoder(ks.layers.Layer):
         # Reshape convolutional layer
         if self.architecture == "convolutional":
             x_shape = x.shape
-            x = ks.layers.Reshape((x_shape[-3], x_shape[-2] * x_shape[-1]))(x)
+            x = ks.layers.Reshape((
+                x_shape[-3],
+                cast("int", x_shape[-2]) * cast("int", x_shape[-1]),
+            ))(x)
             x = cast("tf.Tensor", ks.layers.concatenate([x, input_phase]))
 
         # Project to nspec_dim
         x = self.project_nspec_layer(x)
 
-        # Project to output dimensions (n_physical + n_zs)
+        # Project to output dimensions (self.n_latents)
         x = self.project_output_layer(x)
 
+        is_kept = tf.reduce_min(input_mask, axis=-1)
         outputs: EncodeOutputs = tf.reduce_sum(x * is_kept, axis=-2) / tf.maximum(
             tf.reduce_sum(is_kept, axis=-2), y=1
         )
 
-        if self.n_physical > 0:
-            delta_peak: DeltaPeakLatent = outputs[..., 0:1]
-            delta_amp: DeltaAmpLatent = outputs[..., 1:2]
-            delta_av: DeltaAvLatent = outputs[..., 2:3]
-            zs: ZLatents = outputs[..., 3:]
+        outputs = tf.multiply(outputs, self.train_stage_mask)
 
-            # Training Stages
+        if self.training:
+            is_kept = tf.reduce_max(is_kept[..., 0], axis=-1)
+            reduced_is_kept = tf.reduce_sum(is_kept)
+            batch_mean = tf.reduce_sum(outputs * is_kept, axis=0) / reduced_is_kept
+            outputs = tf.subtract(outputs, batch_mean)
+        else:
+            outputs = tf.subtract(outputs, self.moving_means)
 
-            # Normalisation
-
-            outputs = ks.layers.concatenate([delta_peak, delta_amp, delta_av, zs])
-
-        return outputs
+        return tf.multiply(outputs, self.train_stage_mask)
 
 
 @final
-@keras.saving.register_keras_serializable()
+@keras.saving.register_keras_serializable("SuPAErnova")
 class TFPAEDecoder(ks.layers.Layer):
     def __init__(
-        self, config: TFPAEModelConfig, name: str = "decoder", **kwargs: Any
+        self, config: "PAEModel", name: str = "decoder", **kwargs: Any
     ) -> None:
         super().__init__(name=name, **kwargs)
 
@@ -194,22 +213,29 @@ class TFPAEDecoder(ks.layers.Layer):
 
 
 @final
-@keras.saving.register_keras_serializable()
-class TFPAEModel(ks.layers.Layer):
+@keras.saving.register_keras_serializable("SuPAErnova")
+class TFPAEModel(ks.Model):
     def __init__(
         self,
-        config_dict: dict[str, Any],
+        config: "PAEModel",
         name: str = "autoencoder",
         **kwargs: Any,
     ) -> None:
         super().__init__(name=name, **kwargs)
 
-        config = TFPAEModelConfig.model_validate(config_dict)
-
         self.encoder = TFPAEEncoder(config)
         self.decoder = TFPAEDecoder(config)
 
+    def setup(self, *, training: bool, train_stage: int) -> None:
+        self.encoder.setup(training=training, train_stage=train_stage)
+
     @override
-    def call(self, inputs: "EncodeInputs") -> "DecodeOutputs":
-        latents = self.encoder(inputs)
-        return self.decoder(latents)
+    def call(
+        self,
+        inputs: "EncodeInputs",
+        training: bool | None = None,
+        mask: "TensorCompatible | None" = None,
+    ) -> "DecodeOutputs":
+        amp, phase, mask = inputs
+        latents = self.encoder((amp, phase, mask))
+        return self.decoder((latents, phase, mask))

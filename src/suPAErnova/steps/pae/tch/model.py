@@ -1,17 +1,11 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
-
-
-class TCHPAEModelConfig(BaseModel):
-    pass
+if TYPE_CHECKING:
+    from suPAErnova.steps.pae.model import PAEModel
 
 
 class TCHPAEModel:
-    def __init__(
-        self,
-        config_dict: dict[str, Any],
-    ) -> None:
-        config = TCHPAEModelConfig.model_validate(config_dict)
+    def __init__(self, config: "PAEModel") -> None:
+        pass

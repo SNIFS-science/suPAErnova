@@ -27,27 +27,27 @@ if TYPE_CHECKING:
 class SNPAEData(BaseModel):
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
 
-    ind: npt.NDArray[np.int32]
-    nspectra: npt.NDArray[np.int32]
-    sn_name: npt.NDArray[np.str_]
-    dphase: npt.NDArray[np.float32]
-    redshift: npt.NDArray[np.float32]
-    x0: npt.NDArray[np.float32]
-    x1: npt.NDArray[np.float32]
-    c: npt.NDArray[np.float32]
-    MB: npt.NDArray[np.float32]
-    hubble_residual: npt.NDArray[np.float32]
-    luminosity_distance: npt.NDArray[np.float32]
-    spectra_id: npt.NDArray[np.int64]
-    phase: npt.NDArray[np.float32]
-    wl_mask_min: npt.NDArray[np.float32]
-    wl_mask_max: npt.NDArray[np.float32]
-    amplitude: npt.NDArray[np.float32]
-    sigma: npt.NDArray[np.float32]
-    salt_flux: npt.NDArray[np.float32]
-    wavelength: npt.NDArray[np.float32]
-    mask: npt.NDArray[np.int32]
-    time: npt.NDArray[np.float32]
+    ind: "npt.NDArray[np.int32]"
+    nspectra: "npt.NDArray[np.int32]"
+    sn_name: "npt.NDArray[np.str_]"
+    dphase: "npt.NDArray[np.float32]"
+    redshift: "npt.NDArray[np.float32]"
+    x0: "npt.NDArray[np.float32]"
+    x1: "npt.NDArray[np.float32]"
+    c: "npt.NDArray[np.float32]"
+    MB: "npt.NDArray[np.float32]"
+    hubble_residual: "npt.NDArray[np.float32]"
+    luminosity_distance: "npt.NDArray[np.float32]"
+    spectra_id: "npt.NDArray[np.int64]"
+    phase: "npt.NDArray[np.float32]"
+    wl_mask_min: "npt.NDArray[np.float32]"
+    wl_mask_max: "npt.NDArray[np.float32]"
+    amplitude: "npt.NDArray[np.float32]"
+    sigma: "npt.NDArray[np.float32]"
+    salt_flux: "npt.NDArray[np.float32]"
+    wavelength: "npt.NDArray[np.float32]"
+    mask: "npt.NDArray[np.int32]"
+    time: "npt.NDArray[np.float32]"
 
 
 class DataStep(SNPAEStep[DataStepConfig]):

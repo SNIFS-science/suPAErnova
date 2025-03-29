@@ -12,7 +12,7 @@ from pathlib import Path
 from astropy import cosmology as cosmo
 from pydantic import (
     Field,
-    PositiveInt,  # noqa: TC002
+    PositiveInt,
     field_validator,
     model_validator,
 )
@@ -36,7 +36,7 @@ class DataStepConfig(StepConfig):
     min_phase: float = -10
     max_phase: float = 40
     train_frac: Annotated[float, Field(ge=0, le=1)] = 0.75
-    seed: PositiveInt = 12345
+    seed: "PositiveInt" = 12345
 
     @model_validator(mode="after")
     def validate_paths(self) -> Self:

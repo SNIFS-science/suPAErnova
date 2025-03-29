@@ -1,4 +1,4 @@
-# Copyright 2025 Patrick Armstrong
+regist  # Copyright 2025 Patrick Armstrong
 """TensorFlow Auto Encoder configuration."""
 
 from typing import TYPE_CHECKING, Literal

@@ -1,8 +1,4 @@
 # Copyright 2025 Patrick Armstrong
-"""Implements a probability autoencoder (PAE) to standardise SN Ia from spectra.
-
-SuPAErnova provides tools to read in SN spectral data, train a PAE, and use the trained model to simulate and fit spectra. See [doi](10.3847/1538-4357/ac7c08), [arXiv](https://arxiv.org/abs/2207.07645) for more details.
-"""
 
 import sys
 from typing import TYPE_CHECKING, cast

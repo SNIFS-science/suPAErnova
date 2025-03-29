@@ -1,9 +1,9 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING, ClassVar, get_args, override
+from typing import TYPE_CHECKING, ClassVar, override
 
 from suPAErnova.steps import SNPAEStep
 from suPAErnova.steps.pae.model import PAEModel
-from suPAErnova.configs.steps.pae import TFBackend, PAEStepConfig
+from suPAErnova.configs.steps.pae import PAEStepConfig
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -11,8 +11,11 @@ if TYPE_CHECKING:
     from suPAErnova.steps.data import DataStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.config import GlobalConfig
-    from suPAErnova.steps.pae.model import Model
     from suPAErnova.configs.steps.pae import Backend
+    from suPAErnova.steps.pae.tf.model import TFPAEModel
+    from suPAErnova.steps.pae.tch.model import TCHPAEModel
+
+    Model = TFPAEModel | TCHPAEModel
 
 
 class PAEStep(SNPAEStep[PAEStepConfig]):
@@ -38,10 +41,7 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
         # Optional
 
         # --- Setup Variables ---
-        self.model_cls: type[Model]
         self.pae_model: PAEModel
-
-        # --- Run Variables ---
 
     @override
     def _setup(self, *, data: "DataStep") -> None:
@@ -54,19 +54,8 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
         # Optional
 
         # --- Computed Variables ---
-
-        # Move import statements here to avoid overhead
-        if self.backend in get_args(TFBackend):
-            from suPAErnova.steps.pae.tf.model import TFPAEModel
-
-            self.model_cls = TFPAEModel
-        else:
-            from suPAErnova.steps.pae.tch.model import TCHPAEModel
-
-            self.model_cls = TCHPAEModel
-        self.pae_model = PAEModel(self.model_cls, self.options.pae_model_config)
+        self.pae_model = PAEModel(self.options.model)
         self.pae_model.setup(data=data)
-        self.pae_model.model()
 
     @override
     def _completed(self) -> bool:

@@ -1,7 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from pathlib import Path
 import pkgutil
 import importlib
@@ -9,7 +9,6 @@ import importlib
 from suPAErnova.configs import callback
 
 if TYPE_CHECKING:
-    from typing import Any
     from logging import Logger
 
     from suPAErnova.configs.paths import PathConfig
