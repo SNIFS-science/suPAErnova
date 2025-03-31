@@ -11,6 +11,8 @@ from suPAErnova.configs.steps.pae.model import PAEModelConfig
 
 ActivationObject = Callable[[tf.Tensor], tf.Tensor]
 RegulariserObject = Callable[[tf.Tensor], tf.Tensor] | type[ks.regularizers.Regularizer]
+OptimiserObject = type[ks.optimizers.Optimizer]
+LossObject = Callable[[tf.Tensor, tf.Tensor], tf.Tensor] | type[ks.losses.Loss]
 
 
 def validate_activation(activation: ConfigInputObject[ActivationObject]):
@@ -27,6 +29,23 @@ def validate_kernel_regulariser(
     )
 
 
+def validate_optimiser(
+    optimiser: ConfigInputObject[OptimiserObject],
+):
+    return validate_object(
+        optimiser, dummy_obj=ks.optimizers.Optimizer, mod=ks.optimizers
+    )
+
+
+def validate_loss(
+    loss: ConfigInputObject[LossObject],
+):
+    try:
+        return validate_object(loss, dummy_obj=ks.losses.Loss, mod=ks.losses)
+    except ValueError:
+        return validate_object(loss, dummy_obj=ks.losses.mae, mod=ks.losses)
+
+
 class TFPAEModelConfig(PAEModelConfig):
     # --- Training ---
     activation: ConfigInputObject[ActivationObject]
@@ -40,7 +59,7 @@ class TFPAEModelConfig(PAEModelConfig):
 
     @computed_field
     @cached_property
-    def kernel_regulariser_cls(self) -> type[ks.regularizers.Regularizer]:
+    def kernel_regulariser_cls(self) -> RegulariserObject:
         regulariser = validate_kernel_regulariser(self.kernel_regulariser)
         if isinstance(regulariser, type):
             return regulariser
@@ -53,3 +72,26 @@ class TFPAEModelConfig(PAEModelConfig):
         return CustomRegulariser
 
     kernel_regulariser_penalty: PositiveFloat
+
+    optimiser: ConfigInputObject[OptimiserObject]
+
+    @computed_field
+    @cached_property
+    def optimiser_cls(self) -> OptimiserObject:
+        return validate_optimiser(self.optimiser)
+
+    loss: ConfigInputObject[LossObject]
+
+    @computed_field
+    @cached_property
+    def loss_fn(self) -> type[ks.losses.Loss]:
+        loss = validate_loss(self.loss)
+        if isinstance(loss, type):
+            return loss
+
+        class CustomLoss(ks.losses.Loss):
+            @override
+            def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+                return loss(y_true, y_pred)
+
+        return CustomLoss

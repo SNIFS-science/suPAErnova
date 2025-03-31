@@ -14,15 +14,21 @@ T = TypeVar("T", bound=Callable[..., Any])
 type ConfigInputObject[T] = str | Path | T
 
 
-def validate_signature(obj: T, dummy_obj: T) -> T:
-    fn_signature = signature(obj)
-    dummy_signature = signature(dummy_obj)
+def validate_signature(obj: T, dummy_obj: T, attr: str | None = None) -> T:
+    if attr is not None:
+        fn_signature = signature(getattr(obj, attr))
+        dummy_signature = signature(getattr(dummy_obj, attr))
+    else:
+        fn_signature = signature(obj)
+        dummy_signature = signature(dummy_obj)
     for dummy_param, dummy_sig in dummy_signature.parameters.items():
+        if dummy_param in {"args", "kwargs", "self"}:
+            continue
         if dummy_param not in fn_signature.parameters:
-            err = f"Function `{obj.__name__}` is missing argument `{dummy_param}` of type `{dummy_sig}`"
+            err = f"Function `{obj.__name__}` is missing argument `{dummy_param}` of type `{dummy_sig.annotation}`"
             raise ValueError(err)
         fn_sig = fn_signature.parameters[dummy_param]
-        if fn_sig != dummy_sig:
+        if fn_sig.annotation != dummy_sig.annotation:
             err = f"Argument `{dummy_param}` of function `{obj.__name__}` should be of type `{dummy_sig}`, but is instead of type `{fn_sig}`"
             raise ValueError(err)
     dummy_rtn = dummy_signature.return_annotation
@@ -60,6 +66,7 @@ def validate_object(
     *,
     dummy_obj: T,
     mod: ModuleType | None = None,
+    attr: str | None = None,
 ) -> T:
     if isinstance(obj, str):
         path = Path(obj)
@@ -72,7 +79,7 @@ def validate_object(
             obj = extract_from_module(obj, mod)
     if isinstance(obj, Path):
         obj = extract_from_file(dummy_obj.__name__, obj)
-    return validate_signature(obj, dummy_obj)
+    return validate_signature(obj, dummy_obj, attr=attr)
 
 
 class StepConfig(SNPAEConfig):

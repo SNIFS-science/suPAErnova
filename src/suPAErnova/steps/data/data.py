@@ -603,6 +603,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
         # Scale observed uncertainty to account for fitting degrees of freedom, and an error floor
         data["sigma"] = 1.4 * data["sigma"] + 4e-10
 
+        data["mask"] = data["mask"].astype(np.int32)
+
         self.data = SNPAEData.model_validate(data)
 
     def split_train_test(self) -> None:

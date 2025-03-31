@@ -43,6 +43,7 @@ class PAEModelConfig(StepConfig):
     # --- Network Design ---
     architecture: Literal["dense", "convolutional"]
     encode_dims: list["PositiveInt"]
+    decode_dims: list["PositiveInt"] = []
 
     @field_validator("encode_dims", mode="before")
     @classmethod
@@ -54,6 +55,15 @@ class PAEModelConfig(StepConfig):
             err = f"`encode_dims`: {value} is not monotonically decreasing"
             cls._raise(err)
         return value
+
+    @model_validator(mode="after")
+    def validate_decode_dims(self) -> Self:
+        if len(self.decode_dims) == 0:
+            self.decode_dims = list(reversed(self.encode_dims))
+        if not all(x < y for x, y in itertools.pairwise(self.decode_dims)):
+            err = f"`decode_dims`: {self.decode_dims} is not monotonically decreasing"
+            self._raise(err)
+        return self
 
     physical_latents: bool
     n_z_latents: NonNegativeInt
@@ -73,6 +83,9 @@ class PAEModelConfig(StepConfig):
     # Latent training
     seperate_latent_training: bool
     seperate_z_latent_training: bool
+
+    # Batches
+    batch_size: NonNegativeInt
 
     # === Optional ===
     # --- Data ---

@@ -28,8 +28,8 @@ if TYPE_CHECKING:
 
 
 class Stage(BaseModel):
-    name: str
     stage: "PositiveInt"
+    name: str
 
     training: bool
     epochs: "PositiveInt"
@@ -55,6 +55,7 @@ class PAEModel(SNPAEStep[ModelConfig]):
         self.model_cls: type[Model] = (
             TFPAEModel if isinstance(self.options, TFPAEModelConfig) else TCHPAEModel
         )
+        self.model: Model
 
         # --- Config Variables ---
         # Required
@@ -159,7 +160,7 @@ class PAEModel(SNPAEStep[ModelConfig]):
         z0 = 2 if self.n_physical > 0 else 1
         self.stage_zs = [
             Stage.model_validate({
-                "name": f"z{i}",
+                "name": f"z{i + 1}",
                 "stage": z0 + i,
                 "training": True,
                 "epochs": self.options.zs_epochs,
@@ -226,7 +227,15 @@ class PAEModel(SNPAEStep[ModelConfig]):
 
     @override
     def _run(self) -> None:
-        stage = 1 if self.seperate_latent_training else self.n_latents
+        self.model = self.model_cls(self)
+        for stage in self.run_stages:
+            self.log.debug(f"Starting the {stage.name} training stage")
+            self.model.setup(stage)
+            self.model.run(
+                train_data=self.train_data,
+                test_data=self.test_data,
+                val_data=self.val_data,
+            )
 
     @override
     def _result(self) -> None:
@@ -255,6 +264,3 @@ class PAEModel(SNPAEStep[ModelConfig]):
 
             mask = f"mask_{mask_type}"
             setattr(self, mask, redshift_mask & phase_mask)
-
-    def model(self) -> "Model":
-        return self.model_cls(self)
