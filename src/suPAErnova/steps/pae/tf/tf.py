@@ -8,7 +8,7 @@ from tensorflow import keras as ks
 
 if TYPE_CHECKING:
     from suPAErnova.steps.pae.model import PAEModel
-    from suPAErnova.configs.steps.pae.tf.model import TFPAEModelConfig
+    from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
 
     AmplitudeInput = tf.Tensor
     PhaseInput = tf.Tensor

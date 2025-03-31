@@ -12,11 +12,10 @@ if TYPE_CHECKING:
     from pydantic import PositiveFloat
 
     from suPAErnova.steps.data import DataStep
+    from suPAErnova.steps.pae.tf import TFPAEModel
     from suPAErnova.configs.paths import PathConfig
-    from suPAErnova.configs.config import GlobalConfig
-    from suPAErnova.steps.pae.tf.model import TFPAEModel
-    from suPAErnova.steps.pae.tch.model import TCHPAEModel
-    from suPAErnova.configs.steps.pae.model import Backend
+    from suPAErnova.steps.pae.tch import TCHPAEModel
+    from suPAErnova.configs.globals import GlobalConfig
 
     Model = TFPAEModel | TCHPAEModel
 
