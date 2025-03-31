@@ -482,6 +482,7 @@ class TFPAEModel(ks.Model):
         masked_latents = tf.zeros(self.n_latents - self.stage.stage)
         unmasked_latents = tf.ones(self.stage.stage)
         self.encoder.stage_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
+        tf.print(self.encoder.stage_mask)
 
         # --- Setup Decoder ---
         self.decoder.training = self.stage.training
