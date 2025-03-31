@@ -65,8 +65,8 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # --- Training Params ---
         self.training: bool
-        self.train_stage: int
-        self.train_stage_mask: tf.Tensor
+        self.stage: int
+        self.stage_mask: tf.Tensor
         self.moving_means: tf.Tensor
 
         self.gen_tensor_specs()
@@ -136,16 +136,16 @@ class TFPAEEncoder(ks.layers.Layer):
             use_bias=False,
         )
 
-    def setup(self, *, training: bool, train_stage: int) -> None:
+    def setup(self, *, training: bool, stage: int) -> None:
         self.training = training
-        self.train_stage = train_stage
+        self.stage = stage
 
         # Mask latents which aren't being trained
         # The latents are ordered by training stage
         # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅
-        masked_latents = tf.zeros(self.n_latents - self.train_stage)
-        unmasked_latents = tf.ones(self.train_stage)
-        self.train_stage_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
+        masked_latents = tf.zeros(self.n_latents - self.stage)
+        unmasked_latents = tf.ones(self.stage)
+        self.stage_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
 
     @override
     def call(self, inputs: "EncodeInputs") -> "EncodeOutputs":
@@ -186,7 +186,7 @@ class TFPAEEncoder(ks.layers.Layer):
             tf.reduce_sum(is_kept, axis=-2), y=1
         )
 
-        outputs = tf.multiply(outputs, self.train_stage_mask)
+        outputs = tf.multiply(outputs, self.stage_mask)
 
         if self.training:
             is_kept = tf.reduce_max(is_kept[..., 0], axis=-1)
@@ -196,7 +196,7 @@ class TFPAEEncoder(ks.layers.Layer):
         else:
             outputs = tf.subtract(outputs, self.moving_means)
 
-        return tf.multiply(outputs, self.train_stage_mask)
+        return tf.multiply(outputs, self.stage_mask)
 
 
 @final
@@ -226,8 +226,8 @@ class TFPAEModel(ks.Model):
         self.encoder = TFPAEEncoder(config)
         self.decoder = TFPAEDecoder(config)
 
-    def setup(self, *, training: bool, train_stage: int) -> None:
-        self.encoder.setup(training=training, train_stage=train_stage)
+    def setup(self, *, training: bool, stage: int) -> None:
+        self.encoder.setup(training=training, stage=stage)
 
     @override
     def call(

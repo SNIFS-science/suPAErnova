@@ -45,24 +45,22 @@ class InputConfig(SNPAEConfig):
     @computed_field
     @property
     def steps(self) -> list["SNPAEStep[StepConfig]"]:
-        return [SNPAEStep.steps[step.name](step) for step in self.step_configs]
+        return [SNPAEStep.steps[step.id](step) for step in self.step_configs]
 
     @model_validator(mode="after")
     def validate_steps(self) -> Self:
         for step_config in self.step_configs:
             for required_step in step_config.required_steps:
                 if getattr(self, required_step) is None:
-                    err = (
-                        f"{step_config.name} requires that {required_step} is run first"
-                    )
-                    raise ValueError(err)
+                    err = f"{step_config.id} requires that {required_step} is run first"
+                    self._raise(err)
         return self
 
     def require(self, step_name: str) -> SNPAEStep["StepConfig"]:
         step = getattr(self, step_name + "_step")
         if step is None:
             err = f"{step_name} has not yet run"
-            raise ValueError(err)
+            self._raise(err)
         return step
 
     def run(self) -> None:
@@ -76,4 +74,4 @@ class InputConfig(SNPAEConfig):
             step.run()
             step.result()
             step.analyse()
-            setattr(self, step.name + "_step", step)
+            setattr(self, step.id + "_step", step)

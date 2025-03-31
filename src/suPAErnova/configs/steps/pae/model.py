@@ -1,13 +1,14 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Self, Literal, ClassVar
+from typing import Self, Literal, ClassVar, Annotated
 from pathlib import Path
 import itertools
 
 from pydantic import (
+    Field,
     PositiveInt,
+    PositiveFloat,
     NonNegativeInt,
-    NonNegativeFloat,
     field_validator,
     model_validator,
 )
@@ -15,13 +16,29 @@ from pydantic import (
 from suPAErnova.configs.steps import StepConfig
 from suPAErnova.configs.steps.data import DataStepConfig
 
+TFBackend = Literal["tf", "tensorflow"]
+TCHBackend = Literal["tch", "torch"]
+Backend = TFBackend | TCHBackend
+
 
 class PAEModelConfig(StepConfig):
     # --- Class Variables ---
-    name: ClassVar["str"] = "pae_model"
-    required_steps: ClassVar["list[str]"] = [DataStepConfig.name]
+    id: ClassVar["str"] = "pae_model"
+    required_steps: ClassVar["list[str]"] = [DataStepConfig.id]
 
     # === Required ===
+    backend: "Backend"
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> Self:
+        for var in ["redshift", "phase"]:
+            for data in ["train", "test", "val"]:
+                min_bound = getattr(self, f"min_{data}_{var}")
+                max_bound = getattr(self, f"max_{data}_{var}")
+                if min_bound >= max_bound:
+                    err = f"`max_{data}_{var}`: {max_bound} is not strictly greater than `min_{data}_{var}`: {min_bound}"
+                    self._raise(err)
+        return self
 
     # --- Network Design ---
     architecture: Literal["dense", "convolutional"]
@@ -32,31 +49,69 @@ class PAEModelConfig(StepConfig):
     def validate_encode_dims(cls, value: list[int]) -> list[int]:
         if len(value) == 0:
             err = "`encode_dims` can not be empty"
-            raise ValueError(err)
+            cls._raise(err)
         if not all(x > y for x, y in itertools.pairwise(value)):
             err = f"`encode_dims`: {value} is not monotonically decreasing"
-            raise ValueError(err)
+            cls._raise(err)
         return value
+
+    physical_latents: bool
+    n_z_latents: NonNegativeInt
+
+    @model_validator(mode="after")
+    def validate_n_latents(self) -> Self:
+        if not self.physical_latents and self.n_z_latents == 0:
+            err = "You must specify either non-zero `n_z_latents`, or `physical_latents=True`. With both `physical_latents=False` and `n_z_latents=0, there will be no latents to train at all!"
+            self._raise(err)
+        return self
 
     # --- Training ---
-    dropout: NonNegativeFloat
-
-    @field_validator("dropout", mode="after")
-    @classmethod
-    def validate_dropout(cls, value: NonNegativeFloat) -> NonNegativeFloat:
-        if value > 1:
-            err = f"`dropout` must be between 0 and 1, but is {value}"
-            raise ValueError(err)
-        return value
-
+    # Overfitting
     batch_normalisation: bool
-    n_z_latents: NonNegativeInt
-    physical_latents: bool
+    dropout: Annotated[float, Field(ge=0, le=0)]
+
+    # Latent training
     seperate_latent_training: bool
     seperate_z_latent_training: bool
 
     # === Optional ===
-    colourlaw: "Path | None" = None
+    # --- Data ---
+    min_train_redshift: float = -float("inf")
+    max_train_redshift: float = +float("inf")
+    min_test_redshift: float = -float("inf")
+    max_test_redshift: float = +float("inf")
+    min_val_redshift: float = -float("inf")
+    max_val_redshift: float = +float("inf")
+
+    min_train_phase: float = -float("inf")
+    max_train_phase: float = +float("inf")
+    min_test_phase: float = -float("inf")
+    max_test_phase: float = +float("inf")
+    min_val_phase: float = -float("inf")
+    max_val_phase: float = +float("inf")
+
+    # --- Stages ---
+    # ΔAᵥ
+    delta_av_lr: PositiveFloat = 0.005
+    delta_av_epochs: PositiveInt = 1000
+
+    # Zs
+    zs_lr: PositiveFloat = 0.005
+    zs_epochs: PositiveInt = 1000
+
+    # Δℳ
+    delta_m_lr: PositiveFloat = 0.005
+    delta_m_epochs: PositiveInt = 1000
+
+    # Δ𝓅
+    delta_p_lr: PositiveFloat = 0.005
+    delta_p_epochs: PositiveInt = 1000
+
+    # Final
+    final_lr: PositiveFloat = 0.001
+    final_epochs: PositiveFloat = 5000
+
+    colourlaw: Path | None = None
 
     @model_validator(mode="after")
     def validate_paths(self) -> Self:
@@ -66,5 +121,5 @@ class PAEModelConfig(StepConfig):
             )
             if not self.colourlaw.exists():
                 err = f"`colourlaw` resolved to {self.colourlaw}, which does not exist."
-                raise ValueError(err)
+                self._raise(err)
         return self
