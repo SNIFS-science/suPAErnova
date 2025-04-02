@@ -31,7 +31,7 @@ class Stage(BaseModel):
 
     training: bool
     epochs: PositiveInt
-    debug: bool = True
+    debug: bool = False
 
     learning_rate: PositiveFloat
     learning_rate_decay_steps: PositiveInt

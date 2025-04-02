@@ -170,6 +170,7 @@ class TFPAEEncoder[
             tuple[BatchDim, WLDim, X],
             tuple[BatchDim, WLDim, NSpecDim],
         ]
+
         self.encode_output_layer: Layer[
             ks.layers.Dense,
             tuple[BatchDim, WLDim, NSpecDim],
@@ -583,10 +584,12 @@ class TFPAEModel[
             latent_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
             encoded *= latent_mask
 
+            # TODO:
             # Normalise the physical latents within this batch
             #   such that they have a mean of 0
         else:
             pass
+            # TODO:
             # Normalise the physical latents
             #   such that their mean across *all* batches is 0
 
