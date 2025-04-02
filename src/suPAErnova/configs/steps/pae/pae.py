@@ -23,7 +23,7 @@ class PAEStepConfig(StepConfig):
 
     # --- Previous Steps ---
     data: DataStep | None = None
-    validation_frac: Annotated[float, Field(ge=0, le=0)]
+    validation_frac: Annotated[float, Field(ge=0, le=1)]
 
     # --- Models ---
     model: ModelConfig
@@ -53,6 +53,9 @@ class PAEStepConfig(StepConfig):
                 for pae_model_config in pae_model_configs
             ]
         return data
+
+    # --- Optional ---
+    seed: int = 12345
 
 
 PAEStepConfig.register_step()

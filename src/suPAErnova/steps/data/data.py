@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from suPAErnova.configs.paths import PathConfig
-    from suPAErnova.configs.config import GlobalConfig
+    from suPAErnova.configs.globals import GlobalConfig
 
     SNeDataFrame = pd.DataFrame
 

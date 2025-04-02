@@ -2,7 +2,7 @@
 
 function run {
     # Trick ROCm into working
-    export HSA_OVERRIDE_GFX_VERSION=11.0.0
+    # export HSA_OVERRIDE_GFX_VERSION=11.0.0
     # Device Selection
     local device=0
     export HIP_VISIBLE_DEVICES="${device}"
@@ -10,7 +10,7 @@ function run {
     # Don't immediately fill vram
     export TF_FORCE_GPU_ALLOW_GROWTH="true"
 
-    uv run --no-default-groups --group rocm suPAErnova $@
+    uv run --no-default-groups --group dev --group rocm suPAErnova $@
 }
 
 run $@

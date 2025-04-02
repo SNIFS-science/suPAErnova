@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import TYPE_CHECKING, ClassVar, final, override
+from typing import TYPE_CHECKING, ClassVar, final, get_args, override
 
 from pydantic import (  # noqa: TC002
     BaseModel,
@@ -10,10 +10,8 @@ from pydantic import (  # noqa: TC002
 )
 
 from suPAErnova.steps import SNPAEStep
-from suPAErnova.steps.pae.tf import TFPAEModel
-from suPAErnova.steps.pae.tch import TCHPAEModel
+from suPAErnova.steps.data import SNPAEData  # noqa: TC001
 from suPAErnova.configs.steps.pae import ModelConfig
-from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -22,26 +20,36 @@ if TYPE_CHECKING:
     from numpy import typing as npt
 
     from suPAErnova.steps.pae import Model
-    from suPAErnova.steps.data import DataStep, SNPAEData
+    from suPAErnova.steps.data import DataStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
 
 
 class Stage(BaseModel):
-    stage: "PositiveInt"
+    stage: PositiveInt
     name: str
 
     training: bool
-    epochs: "PositiveInt"
-    learning_rate: "PositiveFloat"
-    moving_means: list[float]
+    epochs: PositiveInt
+    debug: bool = True
+
+    learning_rate: PositiveFloat
+    learning_rate_decay_steps: PositiveInt
+    learning_rate_decay_rate: PositiveFloat
+    learning_rate_weight_decay_rate: PositiveFloat
+
+    train_data: SNPAEData
+    test_data: SNPAEData
+    val_data: SNPAEData
 
 
 @final
-class PAEModel(SNPAEStep[ModelConfig]):
+class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
     id: ClassVar["str"] = "pae_model"
 
     def __init__(self, config: "ModelConfig") -> None:
+        self.model: M
+
         # --- Superclass Variables ---
         self.options: ModelConfig
         self.config: GlobalConfig
@@ -50,12 +58,6 @@ class PAEModel(SNPAEStep[ModelConfig]):
         self.force: bool
         self.verbose: bool
         super().__init__(config)
-
-        # --- Backend Variables ---
-        self.model_cls: type[Model] = (
-            TFPAEModel if isinstance(self.options, TFPAEModelConfig) else TCHPAEModel
-        )
-        self.model: Model
 
         # --- Config Variables ---
         # Required
@@ -149,60 +151,81 @@ class PAEModel(SNPAEStep[ModelConfig]):
 
         # --- Stages ---
         self.stage_delta_av = Stage.model_validate({
-            "name": "ΔAᵥ",
             "stage": 1,
+            "name": "ΔAᵥ",
             "training": True,
             "epochs": self.options.delta_av_epochs,
             "learning_rate": self.options.delta_av_lr,
+            "learning_rate_decay_steps": self.options.delta_av_lr_decay_steps,
+            "learning_rate_decay_rate": self.options.delta_av_lr_decay_rate,
+            "learning_rate_weight_decay_rate": self.options.delta_av_lr_weight_decay_rate,
+            "train_data": self.train_data,
+            "test_data": self.test_data,
+            "val_data": self.val_data,
             "moving_means": [],
         })
 
         z0 = 2 if self.n_physical > 0 else 1
         self.stage_zs = [
             Stage.model_validate({
-                "name": f"z{i + 1}",
                 "stage": z0 + i,
+                "name": f"z{i + 1}",
                 "training": True,
                 "epochs": self.options.zs_epochs,
                 "learning_rate": self.options.zs_lr,
+                "learning_rate_decay_steps": self.options.zs_lr_decay_steps,
+                "learning_rate_decay_rate": self.options.zs_lr_decay_rate,
+                "learning_rate_weight_decay_rate": self.options.zs_lr_weight_decay_rate,
+                "train_data": self.train_data,
+                "test_data": self.test_data,
+                "val_data": self.val_data,
                 "moving_means": [],
             })
             for i in range(self.n_zs)
         ]
 
         self.stage_delta_m = Stage.model_validate({
-            "name": "Δℳ",
             "stage": z0 + self.n_zs,
+            "name": "Δℳ",
             "training": True,
             "epochs": self.options.delta_m_epochs,
             "learning_rate": self.options.delta_m_lr,
-            "moving_means": [],
-        })
-
-        self.stage_delta_m = Stage.model_validate({
-            "name": "Δℳ",
-            "stage": z0 + self.n_zs,
-            "training": True,
-            "epochs": self.options.delta_m_epochs,
-            "learning_rate": self.options.delta_m_lr,
+            "learning_rate_decay_steps": self.options.delta_m_lr_decay_steps,
+            "learning_rate_decay_rate": self.options.delta_m_lr_decay_rate,
+            "learning_rate_weight_decay_rate": self.options.delta_m_lr_weight_decay_rate,
+            "train_data": self.train_data,
+            "test_data": self.test_data,
+            "val_data": self.val_data,
             "moving_means": [],
         })
 
         self.stage_delta_p = Stage.model_validate({
-            "name": "Δ𝓅",
             "stage": z0 + self.n_zs + 1,
+            "name": "Δ𝓅",
             "training": True,
             "epochs": self.options.delta_p_epochs,
             "learning_rate": self.options.delta_p_lr,
+            "learning_rate_decay_steps": self.options.delta_p_lr_decay_steps,
+            "learning_rate_decay_rate": self.options.delta_p_lr_decay_rate,
+            "learning_rate_weight_decay_rate": self.options.delta_p_lr_weight_decay_rate,
+            "train_data": self.train_data,
+            "test_data": self.test_data,
+            "val_data": self.val_data,
             "moving_means": [],
         })
 
         self.stage_final = Stage.model_validate({
-            "name": "Final",
             "stage": self.n_latents,
+            "name": "Final",
             "training": True,
             "epochs": self.options.final_epochs,
             "learning_rate": self.options.final_lr,
+            "learning_rate_decay_steps": self.options.final_lr_decay_steps,
+            "learning_rate_decay_rate": self.options.final_lr_decay_rate,
+            "learning_rate_weight_decay_rate": self.options.final_lr_weight_decay_rate,
+            "train_data": self.train_data,
+            "test_data": self.test_data,
+            "val_data": self.val_data,
             "moving_means": [],
         })
 
@@ -227,15 +250,12 @@ class PAEModel(SNPAEStep[ModelConfig]):
 
     @override
     def _run(self) -> None:
-        self.model = self.model_cls(self)
+        model_cls = get_args(self.__orig_class__)[0]
+        self.model = model_cls(self)
         for stage in self.run_stages:
             self.log.debug(f"Starting the {stage.name} training stage")
-            self.model.setup(stage)
-            self.model.run(
-                train_data=self.train_data,
-                test_data=self.test_data,
-                val_data=self.val_data,
-            )
+            self.model.train_model(stage)
+            # TODO: Save and load checkpoints
 
     @override
     def _result(self) -> None:

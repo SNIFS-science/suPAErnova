@@ -8,7 +8,7 @@
 [pae]
     # === Required ===
     # --- Data ---
-    validation_frac = 0
+    validation_frac = 0.1
 
     # Base-case PAE model
     [pae.model]
@@ -40,10 +40,15 @@
         activation                 = "elu"
         kernel_regulariser         = "L2"
         kernel_regulariser_penalty = 0.01
-        loss                       = "MAE"
+        loss                       = "MeanAbsoluteError"
         optimiser                  = "AdamW"
+        scheduler                  = "ExponentialDecay"
 
     # Each model variant is provided with a different kfold.
+    [[pae.variant]]
+        name = "NewSeed"
+        seed = 98765
+
     [[pae.variant]]
         name = "PhysicalLatents"
 

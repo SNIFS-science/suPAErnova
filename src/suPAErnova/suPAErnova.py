@@ -17,7 +17,7 @@ from suPAErnova.logging import setup_logging
 from suPAErnova.configs.input import InputConfig
 from suPAErnova.configs.paths import PathConfig
 from suPAErnova.configs.steps import StepConfig
-from suPAErnova.configs.config import GlobalConfig
+from suPAErnova.configs.globals import GlobalConfig
 
 if TYPE_CHECKING:
     from pydantic import JsonValue

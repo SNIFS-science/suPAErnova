@@ -1,4 +1,4 @@
-from typing import override
+from typing import Concatenate, override
 from functools import cached_property
 from collections.abc import Callable
 
@@ -10,9 +10,13 @@ from suPAErnova.configs.steps import ConfigInputObject, validate_object
 from suPAErnova.configs.steps.pae.model import PAEModelConfig
 
 ActivationObject = Callable[[tf.Tensor], tf.Tensor]
-RegulariserObject = Callable[[tf.Tensor], tf.Tensor] | type[ks.regularizers.Regularizer]
+RegulariserObject = type[ks.regularizers.Regularizer] | Callable[[tf.Tensor], tf.Tensor]
+SchedulerObject = (
+    type[ks.optimizers.schedules.LearningRateSchedule]
+    | Callable[[Concatenate[int | tf.Tensor, ...]], tf.Tensor]
+)
 OptimiserObject = type[ks.optimizers.Optimizer]
-LossObject = Callable[[tf.Tensor, tf.Tensor], tf.Tensor] | type[ks.losses.Loss]
+LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
 def validate_activation(activation: ConfigInputObject[ActivationObject]):
@@ -23,9 +27,19 @@ def validate_activation(activation: ConfigInputObject[ActivationObject]):
 
 def validate_kernel_regulariser(
     kernel_regulariser: ConfigInputObject[RegulariserObject],
-):
+) -> RegulariserObject:
     return validate_object(
         kernel_regulariser, dummy_obj=ks.regularizers.Regularizer, mod=ks.regularizers
+    )
+
+
+def validate_scheduler(
+    scheduler: ConfigInputObject[SchedulerObject],
+) -> SchedulerObject:
+    return validate_object(
+        scheduler,
+        dummy_obj=ks.optimizers.schedules.LearningRateSchedule,
+        mod=ks.optimizers.schedules,
     )
 
 
@@ -56,10 +70,11 @@ class TFPAEModelConfig(PAEModelConfig):
         return validate_activation(self.activation)
 
     kernel_regulariser: ConfigInputObject[RegulariserObject]
+    kernel_regulariser_penalty: PositiveFloat
 
     @computed_field
     @cached_property
-    def kernel_regulariser_cls(self) -> RegulariserObject:
+    def kernel_regulariser_cls(self) -> type[ks.regularizers.Regularizer]:
         regulariser = validate_kernel_regulariser(self.kernel_regulariser)
         if isinstance(regulariser, type):
             return regulariser
@@ -71,20 +86,51 @@ class TFPAEModelConfig(PAEModelConfig):
 
         return CustomRegulariser
 
-    kernel_regulariser_penalty: PositiveFloat
+    scheduler: ConfigInputObject[SchedulerObject]
+
+    @computed_field
+    @cached_property
+    def scheduler_cls(self) -> type[ks.optimizers.schedules.LearningRateSchedule]:
+        scheduler = validate_scheduler(self.scheduler)
+        if isinstance(scheduler, type):
+            return scheduler
+
+        class CustomScheduler(ks.optimizers.schedules.LearningRateSchedule):
+            @override
+            def __init__(
+                self,
+                *,
+                initial_learning_rate: float,
+                decay_steps: int,
+                decay_rate: float,
+            ) -> None:
+                self.initial_learning_rate: float = initial_learning_rate
+                self.decay_steps: int = decay_steps
+                self.decay_rate: float = decay_rate
+
+            @override
+            def __call__(self, step: int | tf.Tensor) -> tf.Tensor:
+                return scheduler(
+                    step,
+                    initial_learning_rate=self.initial_learning_rate,
+                    decay_steps=self.decay_steps,
+                    decay_rate=self.decay_rate,
+                )
+
+        return CustomScheduler
 
     optimiser: ConfigInputObject[OptimiserObject]
 
     @computed_field
     @cached_property
-    def optimiser_cls(self) -> OptimiserObject:
+    def optimiser_cls(self) -> type[ks.optimizers.Optimizer]:
         return validate_optimiser(self.optimiser)
 
     loss: ConfigInputObject[LossObject]
 
     @computed_field
     @cached_property
-    def loss_fn(self) -> type[ks.losses.Loss]:
+    def loss_cls(self) -> type[ks.losses.Loss]:
         loss = validate_loss(self.loss)
         if isinstance(loss, type):
             return loss
