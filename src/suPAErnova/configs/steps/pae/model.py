@@ -9,6 +9,7 @@ from pydantic import (
     PositiveInt,
     PositiveFloat,
     NonNegativeInt,
+    NonNegativeFloat,
     field_validator,
     model_validator,
 )
@@ -78,17 +79,15 @@ class PAEModelConfig(StepConfig):
     # --- Training ---
     # Overfitting
     batch_normalisation: bool
-    dropout: Annotated[float, Field(ge=0, le=0)]
+    dropout: Annotated[float, Field(ge=0, le=1)]
 
     # Latent training
     seperate_latent_training: bool
     seperate_z_latent_training: bool
 
-    # Batches
-    batch_size: NonNegativeInt
-
     # === Optional ===
     seed: int = 12345
+    batch_size: PositiveInt = 32
 
     # --- Data ---
     min_train_redshift: float = -float("inf")
@@ -104,6 +103,11 @@ class PAEModelConfig(StepConfig):
     max_test_phase: float = +float("inf")
     min_val_phase: float = -float("inf")
     max_val_phase: float = +float("inf")
+
+    # --- Data Offsets ---
+    phase_offset_scale: Literal[0, -1] | PositiveFloat = 0
+    amplitude_offset_scale: NonNegativeFloat = 0
+    mask_fraction: Annotated[float, Field(ge=0, le=1)] = 0
 
     # --- Stages ---
     # ΔAᵥ

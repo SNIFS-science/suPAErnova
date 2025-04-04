@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     Model = TFPAEModel[int, int, int, int, int] | TCHPAEModel
 
 ModelMap: "dict[type[ModelConfig], type[Model]]" = {
-    TFPAEModelConfig: TFPAEModel,
+    TFPAEModelConfig: TFPAEModel[int, int, int, int, int],
     TCHPAEModelConfig: TCHPAEModel,
 }
 

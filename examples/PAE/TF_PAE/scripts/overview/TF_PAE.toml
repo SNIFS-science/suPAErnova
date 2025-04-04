@@ -25,16 +25,20 @@
         physical_latents = true
 
         # --- Training ---
+        batch_size = 149
+
         # Overfitting
         batch_normalisation = true
         dropout             = 0
 
+        # Data Offsets
+        amplitude_offset_scale = 1
+        mask_fraction          = 0.1
+        phase_offset_scale     = 1
+
         # Latent training
         seperate_latent_training   = true
         seperate_z_latent_training = true
-
-        # Batch size
-        batch_size = 50
 
         # TF specific parameters
         activation                 = "elu"

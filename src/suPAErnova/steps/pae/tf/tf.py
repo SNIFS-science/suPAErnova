@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING, Any, Literal, Annotated, cast, override, reveal_type
+from typing import TYPE_CHECKING, Any, Literal, Annotated, cast, override
 
 import keras
 import numpy as np
@@ -30,9 +30,19 @@ if TYPE_CHECKING:
         InputPhaseShape[BatchDim, NSpecDim, PhaseDim]
     ]
 
+    InputDPhaseShape = InputPhaseShape
+    type InputDPhase[BatchDim, NSpecDim, PhaseDim] = Tensor[
+        InputDPhaseShape[BatchDim, NSpecDim, PhaseDim]
+    ]
+
     type InputAmpShape[BatchDim, NSpecDim, WLDim] = tuple[BatchDim, NSpecDim, WLDim]
     type InputAmp[BatchDim, NSpecDim, WLDim] = Tensor[
         InputAmpShape[BatchDim, NSpecDim, WLDim]
+    ]
+
+    InputDAmpShape = InputAmpShape
+    type InputDAmp[BatchDim, NSpecDim, WLDim] = Tensor[
+        InputDAmpShape[BatchDim, NSpecDim, WLDim]
     ]
 
     InputMaskShape = InputAmpShape
@@ -92,18 +102,20 @@ if TYPE_CHECKING:
 
     # Model
     type ModelInputsShape[BatchDim, NSpecDim, PhaseDim, WLDim] = tuple[
-        tuple[
-            InputPhaseShape[BatchDim, NSpecDim, PhaseDim],
-            InputMaskShape[BatchDim, NSpecDim, WLDim],
-        ],
+        InputPhaseShape[BatchDim, NSpecDim, PhaseDim],
+        InputDPhaseShape[BatchDim, NSpecDim, PhaseDim],
         InputAmpShape[BatchDim, NSpecDim, WLDim],
+        InputDAmpShape[BatchDim, NSpecDim, WLDim],
+        InputMaskShape[BatchDim, NSpecDim, WLDim],
     ]
     type ModelInputs[BatchDim, NSpecDim, PhaseDim, WLDim] = tuple[
         tuple[
             Tensor[InputPhaseShape[BatchDim, NSpecDim, PhaseDim]],
+            Tensor[InputDPhaseShape[BatchDim, NSpecDim, PhaseDim]],
+            Tensor[InputAmpShape[BatchDim, NSpecDim, WLDim]],
+            Tensor[InputDAmpShape[BatchDim, NSpecDim, WLDim]],
             Tensor[InputMaskShape[BatchDim, NSpecDim, WLDim]],
-        ],
-        Tensor[InputAmpShape[BatchDim, NSpecDim, WLDim]],
+        ]
     ]
 
     X = int
@@ -131,6 +143,17 @@ class TFPAEEncoder[
         n_physical: Literal[0, 3] = 3 if options.physical_latents else 0
         n_zs: int = options.n_z_latents
         self.n_latents: int = n_physical + n_zs
+        self.latents_z_mask: Tensor[tuple[NLatents]]
+        self.latents_physical_mask: Tensor[tuple[NLatents]]
+
+        # Mask tensors to select specific latents
+        if n_physical > 0:
+            self.latents_z_mask = tf.concat(
+                (tf.zeros(1), tf.ones(n_zs), tf.zeros(1), tf.zeros(1)), axis=0
+            )
+        else:
+            self.latents_z_mask = tf.ones(n_zs)
+        self.latents_physical_mask = tf.abs(self.latents_z_mask - 1)  # Swap 0s and 1s
 
         self.encode_dims: list[int] = options.encode_dims
 
@@ -244,7 +267,7 @@ class TFPAEEncoder[
 
         input_phase = inputs[0]
         input_amp = inputs[1]
-        input_mask = mask if mask is not None else tf.ones(input_amp.shape)
+        input_mask = mask if mask is not None else tf.ones_like(input_amp)
 
         # Create initial input layer
         # (BatchDim, NSpecDim, WLDim + 1)
@@ -279,16 +302,35 @@ class TFPAEEncoder[
             is_kept = cast("Tensor[tuple[BatchDim, NSpecDim, Literal[1]]]", is_kept)
 
         # Latent tensor is the average of the latent values over all unmasked spectra
+        # First sum latents over all unmasked spectra
         # (BatchDim, NLatents)
-        latents: Tensor[tuple[BatchDim, NLatents]] = (
-            # Sum of latents over all unmasked spectra
-            # (BatchDim, NLatents)
-            tf.reduce_sum(x * is_kept, axis=-2)
-            /
-            # Number of of unmasked spectra
-            # (BatchDim, 1)
-            tf.maximum(tf.reduce_sum(is_kept, axis=-2), y=1)
+        batch_sum: Tensor[tuple[BatchDim, NLatents]] = tf.reduce_sum(
+            x * is_kept, axis=-2
         )
+
+        # Then determine the number of unmasked spectra
+        # (BatchDim, 1)
+        batch_num: Tensor[tuple[BatchDim, NLatents]] = tf.maximum(
+            tf.reduce_sum(is_kept, axis=-2), y=1
+        )
+
+        # Finally, calculate the average
+        # (BatchDim, NLatents)
+        latents: Tensor[tuple[BatchDim, NLatents]] = batch_sum / batch_num
+
+        if training:
+            # Normalise the physical latents within this batch such that they have a mean of 0
+            # (1, NLatents)
+            latents_sum: Tensor[tuple[Literal[1], NLatents]] = tf.reduce_sum(
+                latents, axis=0, keepdims=True
+            )
+            latents_num: Tensor[tuple[Literal[1], NLatents]] = tf.reduce_sum(
+                tf.ones_like(latents), axis=0, keepdims=True
+            )
+            latents_mean: Tensor[tuple[Literal[1], NLatents]] = (
+                self.latents_physical_mask * latents_sum / latents_num
+            )
+            latents -= latents_mean
 
         # Repeat latent layers across NSpecDim
         # (BatchDim, NSpecDim, NLatents)
@@ -429,30 +471,26 @@ class TFPAEDecoder[
         input_latents = inputs[0]
         input_phase = inputs[1]
 
-        batch_dim = cast("BatchDim", input_phase.shape[0])
-        nspec_dim = cast("NSpecDim", input_phase.shape[1])
         input_mask = tf.cast(
-            mask if mask is not None else tf.ones((batch_dim, nspec_dim, self.wl_dim)),
+            mask
+            if mask is not None
+            else tf.tile(
+                tf.expand_dims(tf.ones_like(input_phase), axis=-1), [1, 1, self.wl_dim]
+            ),
             tf.float32,
         )
 
         # Extract physical parameters (if applicable)
         if self.n_physical > 0:
-            delta_av_latent: DeltaAvLatent[BatchDim, NSpecDim] = input_latents[..., 0:1]
-            zs_latent: ZLatents[BatchDim, NSpecDim] = input_latents[
-                ..., 1 : self.n_zs + 1
-            ]
-            delta_m_latent: DeltaMLatent[BatchDim, NSpecDim] = input_latents[
-                ..., self.n_zs + 1 : self.n_zs + 2
-            ]
-            delta_p_latent: DeltaPLatent[BatchDim, NSpecDim] = input_latents[
-                ..., self.n_zs + 2 : self.n_zs + 3
-            ]
+            delta_av_latent = input_latents[..., 0:1]
+            zs_latent = input_latents[..., 1 : self.n_zs + 1]
+            delta_m_latent = input_latents[..., self.n_zs + 1 : self.n_zs + 2]
+            delta_p_latent = input_latents[..., self.n_zs + 2 : self.n_zs + 3]
         else:
-            delta_av_latent = tf.zeros((batch_dim, nspec_dim, 1))
+            delta_av_latent = tf.expand_dims(tf.zeros_like(input_phase), axis=-1)
             zs_latent = input_latents[..., 0:]
-            delta_m_latent = tf.zeros((batch_dim, nspec_dim, 1))
-            delta_p_latent = tf.zeros((batch_dim, nspec_dim, 1))
+            delta_m_latent = tf.expand_dims(tf.zeros_like(input_phase), axis=-1)
+            delta_p_latent = tf.expand_dims(tf.zeros_like(input_phase), axis=-1)
 
         # Apply Δ𝓅 shift
         input_phase += delta_p_latent
@@ -516,7 +554,7 @@ class TFPAEModel[
 ](ks.Model):
     def __init__(
         self,
-        config: "PAEModel[TFPAEModel[BatchDim, NSpecDim, PhaseDim, WLDim, NLatents]]",
+        config: "PAEModel[TFPAEModel[int, int, int, int, int]]",
         **kwargs: Any,
     ) -> None:
         super().__init__(name=f"{config.name.split()[-1]}PAEModel", **kwargs)
@@ -526,9 +564,9 @@ class TFPAEModel[
         self.verbose: bool = config.config.verbose
 
         # --- Latent Dimensions ---
-        n_physical: Literal[0, 3] = 3 if options.physical_latents else 0
-        n_zs: int = options.n_z_latents
-        self.n_latents: int = n_physical + n_zs
+        self.n_physical: Literal[0, 3] = 3 if options.physical_latents else 0
+        self.n_zs: int = options.n_z_latents
+        self.n_latents: int = self.n_physical + self.n_zs
 
         # --- Layers ---
         self.encoder: TFPAEEncoder[BatchDim, NSpecDim, PhaseDim, WLDim, NLatents] = (
@@ -541,13 +579,26 @@ class TFPAEModel[
         self.decoder.wl_dim = config.wl_dim
 
         # --- Training ---
-        self.stage: Stage
-        self._epoch: int
+        self.batch_size: int = config.batch_size
+
+        # Data Offsets
+        self.phase_offset_scale: Literal[0, -1] | float = config.phase_offset_scale
+        self.amplitude_offset_scale: float = config.amplitude_offset_scale
+        self.mask_fraction: float = config.mask_fraction
+
         self._scheduler: type[ks.optimizers.schedules.LearningRateSchedule] = (
             options.scheduler_cls
         )
         self._optimiser: type[ks.optimizers.Optimizer] = options.optimiser_cls
         self._loss: ks.losses.Loss = options.loss_cls()
+
+        self.stage: Stage
+        self._epoch: int
+
+        # Pre-calculated tensors used per-epoch
+        self.prep_mask_fraction: Tensor[tuple[BatchDim, NSpecDim, WLDim]]
+        self.prep_shuffle_indices: Tensor[tuple[int, Literal[2]]]
+        self.prep_shuffle_spectra_indices_per_sn: Tensor[tuple[BatchDim, int]]
 
         # --- Metrics ---
         self.loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss")
@@ -573,7 +624,7 @@ class TFPAEModel[
         training = False if training is None else training
 
         encoded: EncoderOutputs[BatchDim, NSpecDim, NLatents] = self.encoder(
-            inputs, mask=mask
+            inputs, training=training, mask=mask
         )
         if training:
             # Mask latents which aren't being trained
@@ -583,18 +634,12 @@ class TFPAEModel[
             unmasked_latents = tf.ones(self.stage.stage)
             latent_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
             encoded *= latent_mask
-
-            # TODO:
-            # Normalise the physical latents within this batch
-            #   such that they have a mean of 0
         else:
-            pass
-            # TODO:
-            # Normalise the physical latents
-            #   such that their mean across *all* batches is 0
+            # Normalise the physical latents within this batch such that the entire unbatched sample has a mean of 0
+            encoded -= tf.convert_to_tensor(self.stage.moving_means)
 
         decoded: DecoderOutputs[BatchDim, NSpecDim, WLDim] = self.decoder(
-            (encoded, inputs[0]), mask=mask
+            (encoded, inputs[0]), training=training, mask=mask
         )
 
         return decoded
@@ -606,8 +651,9 @@ class TFPAEModel[
         y: "TensorCompatible | None" = None,
         y_pred: "TensorCompatible | None" = None,
         sample_weight: Any | None = None,
-        training: bool = True,
+        training: bool | None = None,
     ) -> tf.Tensor | None:
+        training = False if training is None else training
         if y is None or y_pred is None:
             return None
         loss = self._loss(y_true=y, y_pred=y_pred)
@@ -624,22 +670,24 @@ class TFPAEModel[
         data: "TensorCompatible",
     ) -> dict[str, tf.Tensor | dict[str, tf.Tensor]]:
         # === Per Epoch Setup ===
+        training = self.stage.training
 
         # Fixed RNG
         tf.random.set_seed(self._epoch)
         self._epoch += 1
 
         # --- Setup Data ---
-        # TODO: Data Masking
-        (train_phase, train_mask), train_amp = cast(
-            "ModelInputs[BatchDim, NSpecDim, PhaseDim, WLDim]", data
+        ((phase, _d_phase, amplitude, _d_amplitude, mask),) = self.prep_data_per_epoch(
+            cast("ModelInputs[BatchDim, NSpecDim, PhaseDim, WLDim]", data)
         )
 
         with tf.GradientTape() as tape:
             output_amp: DecoderOutputs[BatchDim, NSpecDim, WLDim] = self(
-                (train_phase, train_amp), training=True, mask=train_mask
+                (phase, amplitude), training=training, mask=mask
             )
-            loss = self.compute_loss(x=train_phase, y=train_amp, y_pred=output_amp)
+            loss = self.compute_loss(
+                x=phase, y=amplitude, y_pred=output_amp, training=training
+            )
         if loss is None:
             return {m.name: m.result() for m in self.metrics}
 
@@ -653,7 +701,7 @@ class TFPAEModel[
             if metric.name == "loss":
                 metric.update_state(loss)
             else:
-                metric.update_state(train_amp, output_amp)
+                metric.update_state(amplitude, output_amp)
 
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
@@ -676,15 +724,226 @@ class TFPAEModel[
             weight_decay=self.stage.learning_rate_weight_decay_rate,
         )
         loss = self._loss
-        self.compile(optimizer=optimiser, loss=loss, run_eagerly=self.stage.debug)
+        self.compile(
+            optimizer=optimiser,
+            loss=loss,
+            run_eagerly=self.stage.debug,
+        )
+
+        data = (
+            (
+                self.stage.train_data.phase,
+                self.stage.train_data.dphase,
+                self.stage.train_data.amplitude,
+                self.stage.train_data.sigma,
+                self.stage.train_data.mask,
+            ),
+        )
 
         # === Train ===
         self.fit(
-            x=(
-                self.stage.train_data.phase,
-                self.stage.train_data.mask,
-            ),
-            y=self.stage.train_data.amplitude,
+            self.prep_data(
+                cast("ModelInputs[BatchDim, NSpecDim, PhaseDim, WLDim]", data)
+            )[0],
             initial_epoch=self._epoch,
             epochs=self.stage.epochs,
+            batch_size=self.batch_size,
         )
+
+    def prep_data(
+        self, data: "ModelInputs[BatchDim, NSpecDim, PhaseDim, WLDim]"
+    ) -> "ModelInputs[BatchDim, NSpecDim, PhaseDim, WLDim]":
+        ((phase, d_phase, amplitude, d_amplitude, mask),) = data
+
+        wl_dim = tf.shape(mask)[-1]
+
+        # Mask Spectra
+        # The goal here is to randomly mask a fraction of all valid (unmasked) spectra
+
+        # --- Randomised Masking ---
+        # Sum mask tensor over NSpecDim, gives the number of unmasked spectra for each SN
+        # (BatchDim,)
+        n_unmasked_spectra_per_sn: Tensor[tuple[BatchDim, WLDim]] = tf.reduce_sum(
+            mask, axis=1
+        )[:, 0]
+
+        # Determine how many spectra to mask for each SN
+        #   by multiplying the number of unmasked SN by the mask_fraction
+        # (BatchDim,)
+        n_spectra_to_mask_per_sn: Tensor[tuple[BatchDim]] = tf.cast(
+            tf.round(
+                self.mask_fraction * tf.cast(n_unmasked_spectra_per_sn, tf.float32)
+            ),
+            tf.int32,
+        )
+
+        # Get the indices (batch_ind, nspec_ind, wl_ind (unused)) of each unmasked spectrum
+        # (n_unmasked_spectra, 3)
+        unmasked_indices: Tensor[tuple[int, Literal[3]]] = tf.cast(
+            tf.where(mask), tf.int32
+        )
+
+        # For each unmasked spectrum, get the index of its corresponding SN
+        # (n_unmasked_spectra,)
+        maskable_sn_indices: Tensor[tuple[int]] = unmasked_indices[:, 0]
+
+        # For each unmasked spectrum, get its index
+        # (n_unmasked_spectra,)
+        maskable_spectra_indices: Tensor[tuple[int]] = unmasked_indices[:, 1]
+
+        # Gather the number of spectra to mask per maskable sn
+        # (n_unmasked_spectra,)
+        n_spectra_to_mask_per_maskable_sn: Tensor[tuple[int]] = tf.cast(
+            tf.gather(n_spectra_to_mask_per_sn, maskable_sn_indices), tf.int32
+        )
+
+        # Determine which spectrum should be masked.
+        #   If a spectrum's index is less than the number of spectra to mask for that SN, then mask that spectrum.
+        #   This essentially means we are masking the first `n_spectra_to_mask` spectra of each SN.
+        # (n_unmasked_spectra,)
+        maskable_indices: Tensor[tuple[int]] = (
+            maskable_spectra_indices <= n_spectra_to_mask_per_maskable_sn
+        )
+
+        # Get the indices of each spectrum we are going to mask.
+        # (n_spectra_to_mask, 3)
+        mask_indices: Tensor[tuple[int, Literal[3]]] = tf.boolean_mask(
+            unmasked_indices, maskable_indices
+        )
+        n_spectra_to_mask = tf.shape(mask_indices)[0]
+
+        # Since we want to mask these spectra, we will update the mask at these indices with 0
+        #   So this tensor just contains the value (0) we want to update the mask with
+        # (n_spectra_to_mask,)
+        mask_updates: Tensor[tuple[int]] = tf.zeros(n_spectra_to_mask, dtype=tf.int32)
+
+        # The masking tensor we are going to apply these updates to
+        # (BatchDim, NSpecDim, WLDim)
+        base_mask: Tensor[tuple[BatchDim, NSpecDim, WLDim]] = tf.ones_like(
+            mask, dtype=tf.int32
+        )
+
+        # Update the values in `base_mask` at the indices with `mask_indices` with the corresponding values in `mask_updates`.
+        # (BatchDim, NSpecDim, WLDim)
+        self.prep_mask_fraction = tf.tensor_scatter_nd_update(
+            base_mask, mask_indices, mask_updates
+        )
+
+        # --- Randomised Shuffling ---
+
+        # Gather the number of spectra to shuffle per maskable sn,
+        # (n_unmasked_spectra,)
+        n_spectra_to_shuffle_per_maskable_sn: Tensor[tuple[int]] = tf.cast(
+            tf.gather(n_unmasked_spectra_per_sn, maskable_sn_indices), tf.int32
+        )
+
+        # Determine which spectrum should be shuffled.
+        #   If a spectrum's index is less than the number of spectra to shuffle for that SN, then shuffle that spectrum.
+        #   This essentially means we are shuffling the first `n_spectra_to_shuffle` spectra of each SN.
+        # (n_unmasked_spectra,)
+        shufflable_indices: Tensor[tuple[int]] = (
+            maskable_spectra_indices <= n_spectra_to_shuffle_per_maskable_sn
+        )
+
+        # Get the indices of each spectrum we are going to shuffle.
+        # (n_shuffle_spectra, 2)
+        shuffle_indices: Tensor[tuple[int, Literal[2]]] = tf.boolean_mask(
+            unmasked_indices, shufflable_indices
+        )  # Get the (3 dimensional) indicies
+        shuffle_indices = shuffle_indices[:, :-1]  # Only keep the first two indices
+        stride_indices = tf.range(0, tf.shape(shuffle_indices)[0], wl_dim)
+        self.prep_shuffle_indices = shuffle_indices = tf.gather(
+            shuffle_indices, stride_indices
+        )  # Only keep one index each WLDim step
+
+        # For each spectrum we will shuffle, get the index of its corresponding SN
+        # (n_shuffle_spectra,)
+        shuffle_sn_indices: Tensor[tuple[int]] = shuffle_indices[:, 0]
+
+        # For each spectrum we will shuffle, get its index
+        # (n_shuffle_spectra,)
+        shuffle_spectra_indices: Tensor[tuple[int]] = shuffle_indices[:, 1]
+
+        # For each SN, get the index of each spectra we want to shuffle.
+        #   Since different SNe will have a different number of spectra to shuffle, this is a ragged tensor
+        # (BatchDim, n_spectra_to_shuffle_per_sn) where ∑n_spectra_to_shuffle_per_sn = n_shuffle_spectra
+        self.prep_shuffle_spectra_indices_per_sn = tf.RaggedTensor.from_value_rowids(
+            shuffle_spectra_indices,
+            shuffle_sn_indices,
+        )
+
+        return ((phase, d_phase, amplitude, d_amplitude, mask),)
+
+    def prep_data_per_epoch(
+        self, data: "ModelInputs[BatchDim, NSpecDim, PhaseDim, WLDim]"
+    ) -> "ModelInputs[BatchDim, NSpecDim, PhaseDim, WLDim]":
+        ((phase, d_phase, amplitude, d_amplitude, mask),) = data
+
+        # Precompute shapes
+        shape_d_phase = tf.shape(d_phase)
+        shape_d_amplitude = tf.shape(d_amplitude)
+
+        # Phase Offset
+        phase_offset: Tensor[tuple[BatchDim, NSpecDim, PhaseDim]]
+        if self.phase_offset_scale == 0:
+            phase_offset = tf.zeros_like(d_phase)
+        elif self.phase_offset_scale == -1:
+            phase_offset = d_phase * tf.random.normal(shape_d_phase)
+        else:
+            phase_offset = (
+                tf.ones_like(d_phase)
+                * self.phase_offset_scale
+                * tf.random.normal(shape_d_phase)
+            )
+        phase += phase_offset
+
+        # Amplitude Offset
+        amplitude_offset: Tensor[tuple[BatchDim, NSpecDim, PhaseDim]] = (
+            d_amplitude
+            * self.amplitude_offset_scale
+            * tf.random.normal(shape_d_amplitude)
+        )
+        amplitude += amplitude_offset
+
+        ((phase, d_phase, amplitude, d_amplitude, mask),) = data
+        # For each SN, shuffle the indices of each spectra we want to shuffle
+        # (BatchDim, n_spectra_to_shuffle_per_sn) where ∑n_spectra_to_shuffle_per_sn = n_shuffle_spectra
+        shuffled_indices: Tensor[tuple[BatchDim, int]] = tf.ragged.map_flat_values(
+            tf.random.shuffle, self.prep_shuffle_spectra_indices_per_sn
+        )
+
+        # Now that we've shuffled the indices of each spectra for each SN,
+        #   We need to shuffle the actual spectra of each SN.
+        #   Since the spectra were only shuffled with others from the same SN,
+        #   the SN index associated with each shuffled spectra is the same too
+        #   So this just repeats the SN index once for each shuffled spectra associated with that SN.
+        # (n_shuffle_spectra,)
+        gather_sn_indices: Tensor[tuple[int]] = tf.repeat(
+            tf.range(shuffled_indices.nrows()), shuffled_indices.row_lengths()
+        )
+
+        # Flatten out the ragged shuffled_indices tensor, and stack with the gather_sn_indices tensor.
+        # This tensor encodes where each spectrum will be shuffled to.
+        # (n_shuffle_spectra, 2)
+        gather_shuffled_indices: Tensor[tuple[int, Literal[2]]] = tf.stack(
+            (gather_sn_indices, shuffled_indices.flat_values), axis=1
+        )
+
+        # For each shuffled index in gather_shuffled_indices, get the corresponding element in `mask_fraction`
+        # This allows us to randomise which spectra are masked, rather than always masking the first `n_spectra_to_mask` spectra
+        # (n_shuffle_spectra, WLDim)
+        shuffle_update: Tensor[tuple[int, WLDim]] = tf.gather_nd(
+            self.prep_mask_fraction, gather_shuffled_indices
+        )
+
+        # The final mask which randomly masks a fraction of spectra per SN
+        # (BatchDim, NSpecDim, WLDim)
+        shuffle_and_mask: Tensor[tuple[BatchDim, NSpecDim, WLDim]] = (
+            tf.tensor_scatter_nd_update(
+                self.prep_mask_fraction, self.prep_shuffle_indices, shuffle_update
+            )
+        )
+
+        mask *= shuffle_and_mask
+
+        return ((phase, d_phase, amplitude, d_amplitude, mask),)

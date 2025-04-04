@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING, ClassVar, final, get_args, override
 
+import numpy as np
+from numpy import typing as npt
 from pydantic import (  # noqa: TC002
     BaseModel,
     PositiveInt,
@@ -16,9 +18,6 @@ from suPAErnova.configs.steps.pae import ModelConfig
 if TYPE_CHECKING:
     from logging import Logger
 
-    import numpy as np
-    from numpy import typing as npt
-
     from suPAErnova.steps.pae import Model
     from suPAErnova.steps.data import DataStep
     from suPAErnova.configs.paths import PathConfig
@@ -29,7 +28,7 @@ class Stage(BaseModel):
     stage: PositiveInt
     name: str
 
-    training: bool
+    training: bool = True
     epochs: PositiveInt
     debug: bool = False
 
@@ -41,6 +40,8 @@ class Stage(BaseModel):
     train_data: SNPAEData
     test_data: SNPAEData
     val_data: SNPAEData
+
+    moving_means: list[float] = []
 
 
 @final
@@ -83,6 +84,13 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.min_val_phase: NonNegativeFloat
         self.max_val_phase: NonNegativeFloat
 
+        self.batch_size: PositiveInt
+
+        # Data Offsets
+        self.phase_offset_scale: float
+        self.amplitude_offset_scale: float
+        self.mask_fraction: float
+
         # --- Previous Step Variables ---
         self.data: DataStep
         self.train_data: SNPAEData
@@ -94,10 +102,6 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.phase_dim: int
 
         # --- Setup Variables ---
-        self.mask_train: npt.NDArray[np.bool_]
-        self.mask_test: npt.NDArray[np.bool_]
-        self.mask_val: npt.NDArray[np.bool_]
-
         self.stage_delta_av: Stage
         self.stage_zs: list[Stage]
         self.stage_delta_m: Stage
@@ -138,6 +142,13 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.min_val_phase = self.options.min_val_phase
         self.max_val_phase = self.options.max_val_phase
 
+        self.batch_size = self.options.batch_size
+
+        # Data Offsets
+        self.phase_offset_scale = self.options.phase_offset_scale
+        self.amplitude_offset_scale = self.options.amplitude_offset_scale
+        self.mask_fraction = self.options.mask_fraction
+
         # --- Previous Step Variables ---
         self.data = data
         self.train_data = train_data
@@ -150,19 +161,21 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.phase_dim = 1
 
         # --- Stages ---
+        stage_data = {
+            "train_data": self.train_data,
+            "test_data": self.test_data,
+            "val_data": self.val_data,
+        }
+
         self.stage_delta_av = Stage.model_validate({
             "stage": 1,
             "name": "ΔAᵥ",
-            "training": True,
             "epochs": self.options.delta_av_epochs,
             "learning_rate": self.options.delta_av_lr,
             "learning_rate_decay_steps": self.options.delta_av_lr_decay_steps,
             "learning_rate_decay_rate": self.options.delta_av_lr_decay_rate,
             "learning_rate_weight_decay_rate": self.options.delta_av_lr_weight_decay_rate,
-            "train_data": self.train_data,
-            "test_data": self.test_data,
-            "val_data": self.val_data,
-            "moving_means": [],
+            **stage_data,
         })
 
         z0 = 2 if self.n_physical > 0 else 1
@@ -170,16 +183,12 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
             Stage.model_validate({
                 "stage": z0 + i,
                 "name": f"z{i + 1}",
-                "training": True,
                 "epochs": self.options.zs_epochs,
                 "learning_rate": self.options.zs_lr,
                 "learning_rate_decay_steps": self.options.zs_lr_decay_steps,
                 "learning_rate_decay_rate": self.options.zs_lr_decay_rate,
                 "learning_rate_weight_decay_rate": self.options.zs_lr_weight_decay_rate,
-                "train_data": self.train_data,
-                "test_data": self.test_data,
-                "val_data": self.val_data,
-                "moving_means": [],
+                **stage_data,
             })
             for i in range(self.n_zs)
         ]
@@ -187,46 +196,34 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.stage_delta_m = Stage.model_validate({
             "stage": z0 + self.n_zs,
             "name": "Δℳ",
-            "training": True,
             "epochs": self.options.delta_m_epochs,
             "learning_rate": self.options.delta_m_lr,
             "learning_rate_decay_steps": self.options.delta_m_lr_decay_steps,
             "learning_rate_decay_rate": self.options.delta_m_lr_decay_rate,
             "learning_rate_weight_decay_rate": self.options.delta_m_lr_weight_decay_rate,
-            "train_data": self.train_data,
-            "test_data": self.test_data,
-            "val_data": self.val_data,
-            "moving_means": [],
+            **stage_data,
         })
 
         self.stage_delta_p = Stage.model_validate({
             "stage": z0 + self.n_zs + 1,
             "name": "Δ𝓅",
-            "training": True,
             "epochs": self.options.delta_p_epochs,
             "learning_rate": self.options.delta_p_lr,
             "learning_rate_decay_steps": self.options.delta_p_lr_decay_steps,
             "learning_rate_decay_rate": self.options.delta_p_lr_decay_rate,
             "learning_rate_weight_decay_rate": self.options.delta_p_lr_weight_decay_rate,
-            "train_data": self.train_data,
-            "test_data": self.test_data,
-            "val_data": self.val_data,
-            "moving_means": [],
+            **stage_data,
         })
 
         self.stage_final = Stage.model_validate({
             "stage": self.n_latents,
             "name": "Final",
-            "training": True,
             "epochs": self.options.final_epochs,
             "learning_rate": self.options.final_lr,
             "learning_rate_decay_steps": self.options.final_lr_decay_steps,
             "learning_rate_decay_rate": self.options.final_lr_decay_rate,
             "learning_rate_weight_decay_rate": self.options.final_lr_weight_decay_rate,
-            "train_data": self.train_data,
-            "test_data": self.test_data,
-            "val_data": self.val_data,
-            "moving_means": [],
+            **stage_data,
         })
 
         if self.n_physical > 0:
@@ -282,5 +279,6 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
             max_phase: float = getattr(self, f"max_{mask_type}_phase")
             phase_mask = (data.phase >= min_phase) & (data.phase <= max_phase)
 
-            mask = f"mask_{mask_type}"
-            setattr(self, mask, redshift_mask & phase_mask)
+            mask = (redshift_mask & phase_mask).astype(np.int32)
+            data.mask *= mask
+            setattr(self, f"{mask_type}_data", data)
