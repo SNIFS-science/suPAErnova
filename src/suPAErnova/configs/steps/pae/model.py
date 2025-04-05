@@ -89,6 +89,8 @@ class PAEModelConfig(StepConfig):
     seed: int = 12345
     batch_size: PositiveInt = 32
 
+    save_best: bool = False
+
     # --- Data ---
     min_train_redshift: float = -float("inf")
     max_train_redshift: float = +float("inf")

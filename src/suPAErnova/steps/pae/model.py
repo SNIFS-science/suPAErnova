@@ -1,9 +1,10 @@
 # Copyright 2025 Patrick Armstrong
 
 from typing import TYPE_CHECKING, ClassVar, final, get_args, override
+from pathlib import Path
+import tempfile as tmp
 
 import numpy as np
-from numpy import typing as npt
 from pydantic import (  # noqa: TC002
     BaseModel,
     PositiveInt,
@@ -27,6 +28,8 @@ if TYPE_CHECKING:
 class Stage(BaseModel):
     stage: PositiveInt
     name: str
+    fname: str
+    savepath: Path = Path(tmp.gettempdir())
 
     training: bool = True
     epochs: PositiveInt
@@ -84,13 +87,6 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.min_val_phase: NonNegativeFloat
         self.max_val_phase: NonNegativeFloat
 
-        self.batch_size: PositiveInt
-
-        # Data Offsets
-        self.phase_offset_scale: float
-        self.amplitude_offset_scale: float
-        self.mask_fraction: float
-
         # --- Previous Step Variables ---
         self.data: DataStep
         self.train_data: SNPAEData
@@ -142,13 +138,6 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.min_val_phase = self.options.min_val_phase
         self.max_val_phase = self.options.max_val_phase
 
-        self.batch_size = self.options.batch_size
-
-        # Data Offsets
-        self.phase_offset_scale = self.options.phase_offset_scale
-        self.amplitude_offset_scale = self.options.amplitude_offset_scale
-        self.mask_fraction = self.options.mask_fraction
-
         # --- Previous Step Variables ---
         self.data = data
         self.train_data = train_data
@@ -170,6 +159,7 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.stage_delta_av = Stage.model_validate({
             "stage": 1,
             "name": "ΔAᵥ",
+            "fname": "delta_av",
             "epochs": self.options.delta_av_epochs,
             "learning_rate": self.options.delta_av_lr,
             "learning_rate_decay_steps": self.options.delta_av_lr_decay_steps,
@@ -183,6 +173,7 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
             Stage.model_validate({
                 "stage": z0 + i,
                 "name": f"z{i + 1}",
+                "fname": f"z{i + 1}",
                 "epochs": self.options.zs_epochs,
                 "learning_rate": self.options.zs_lr,
                 "learning_rate_decay_steps": self.options.zs_lr_decay_steps,
@@ -196,6 +187,7 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.stage_delta_m = Stage.model_validate({
             "stage": z0 + self.n_zs,
             "name": "Δℳ",
+            "fname": "delta_m",
             "epochs": self.options.delta_m_epochs,
             "learning_rate": self.options.delta_m_lr,
             "learning_rate_decay_steps": self.options.delta_m_lr_decay_steps,
@@ -207,6 +199,7 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.stage_delta_p = Stage.model_validate({
             "stage": z0 + self.n_zs + 1,
             "name": "Δ𝓅",
+            "fname": "delta_p",
             "epochs": self.options.delta_p_epochs,
             "learning_rate": self.options.delta_p_lr,
             "learning_rate_decay_steps": self.options.delta_p_lr_decay_steps,
@@ -218,6 +211,7 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.stage_final = Stage.model_validate({
             "stage": self.n_latents,
             "name": "Final",
+            "fname": "final",
             "epochs": self.options.final_epochs,
             "learning_rate": self.options.final_lr,
             "learning_rate_decay_steps": self.options.final_lr_decay_steps,
@@ -249,7 +243,12 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
     def _run(self) -> None:
         model_cls = get_args(self.__orig_class__)[0]
         self.model = model_cls(self)
+        savepath: Path | None = None
         for stage in self.run_stages:
+            if savepath is not None:
+                self.log.debug("Loading checkpoint from previous stage")
+            savepath = self.paths.out / self.model.name / stage.fname
+            stage.savepath = savepath
             self.log.debug(f"Starting the {stage.name} training stage")
             self.model.train_model(stage)
             # TODO: Save and load checkpoints

@@ -11,7 +11,7 @@ function run {
     # --- TF Env Vars ---
     # Don't immediately fill vram
     export TF_FORCE_GPU_ALLOW_GROWTH="true"
-    # Enable XLA auto-clustering
+    Enable XLA auto-clustering
     local TF_XLA_FLAGS="--tf_xla_auto_jit=2 --tf_xla_cpu_global_jit"
     local XLA_FLAGS=""
 

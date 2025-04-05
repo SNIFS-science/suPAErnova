@@ -12,6 +12,7 @@
 
     # Base-case PAE model
     [pae.model]
+
         name = "Default"
 
         # === Required ===
@@ -25,16 +26,16 @@
         physical_latents = true
 
         # --- Training ---
-        batch_size = 149
+        # batch_size = 149
 
         # Overfitting
         batch_normalisation = true
-        dropout             = 0
+        dropout             = 0.01
 
         # Data Offsets
         amplitude_offset_scale = 1
         mask_fraction          = 0.1
-        phase_offset_scale     = 1
+        phase_offset_scale     = 0.02
 
         # Latent training
         seperate_latent_training   = true

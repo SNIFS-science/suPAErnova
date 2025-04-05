@@ -28,10 +28,11 @@
 
 [dependency-groups]
     dev = [
+        "jaxtyping>=0.3.1",
         "pandas-stubs>=2.2.3.241126",
         "pytest>=8.3.5",
         "types-tensorflow>=2.18.0.20241227",
-    ]
+]
 
     default = [
         "tensorflow>=2.18.0",
@@ -86,6 +87,9 @@
     reportUnknownParameterType = false
     reportUnknownVariableType  = false
 
+    # Don't report unecessary type casts
+    reportUnnecessaryCast = false
+
     # Don't report unused call results
     # Stops errors around functions with side-effects
     # Like matplotlib
@@ -130,6 +134,10 @@
             "N999",    # Invalid module name
             "PLR0913", # Too many arguments in function definition (_ > 5) 
             "PLR0917", # Too many positional arguments (_/5) 
+            "ANN401",  # Allow *args: Any and **kwargs: Any
+            "UP037",   # Don't remove quotes from type annotations
+            "TC008",   # Don't remove quotes from type aliases
+            "F722",    # Ignore forward annotation syntax errors
         ]
 
         per-file-ignores = {"src/suPAErnova/configs/**.py" = [

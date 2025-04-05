@@ -22,10 +22,10 @@ if TYPE_CHECKING:
     from suPAErnova.configs.globals import GlobalConfig
 
     ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
-    Model = TFPAEModel[int, int, int, int, int] | TCHPAEModel
+    Model = TFPAEModel | TCHPAEModel
 
 ModelMap: "dict[type[ModelConfig], type[Model]]" = {
-    TFPAEModelConfig: TFPAEModel[int, int, int, int, int],
+    TFPAEModelConfig: TFPAEModel,
     TCHPAEModelConfig: TCHPAEModel,
 }
 
