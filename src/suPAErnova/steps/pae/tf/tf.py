@@ -1027,7 +1027,6 @@ class TFPAEModel(ks.Model):
                 spec_inds_to_shuffle = cast(
                     "ITensor[S['n_spec_to_shuffle 2']]", spec_inds_to_shuffle
                 )
-
             # The final mask which randomly masks a fraction of spectra per SN
             shuffled_mask = tf.tensor_scatter_nd_update(
                 unshuffled_mask, spec_inds_to_shuffle, spec_masks
@@ -1043,7 +1042,6 @@ class TFPAEModel(ks.Model):
                 shuffled_amp_mask = cast(
                     "ITensor[S['batch_dim nspec_dim wl_dim']]", shuffled_amp_mask
                 )
-
             mask *= shuffled_amp_mask
 
         return (phase, d_phase, amplitude, d_amplitude, mask)
