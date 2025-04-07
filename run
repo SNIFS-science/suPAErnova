@@ -24,7 +24,7 @@ function run {
     fi
     export TF_XLA_FLAGS
     export XLA_FLAGS
-
+    
     uv run --no-default-groups --group dev --group rocm suPAErnova $@
 }
 

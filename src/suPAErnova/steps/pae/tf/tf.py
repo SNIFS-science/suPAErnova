@@ -1,7 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 from typing import (
     TYPE_CHECKING,
-    Self,
     cast,
     override,
 )
@@ -18,7 +17,8 @@ if TYPE_CHECKING:
         Annotated,
     )
     from logging import Logger
-    from collections.abc import Callable
+    from pathlib import Path
+    from collections.abc import Callable, Sequence
 
     from numpy import typing as npt
 
@@ -31,6 +31,18 @@ if TYPE_CHECKING:
     type ITensor[Shape: str] = Annotated[tf.Tensor, tf.int32, Shape]
     type FRTensor[Shape: str] = Annotated[tf.RaggedTensor, tf.float32, Shape]
     type IRTensor[Shape: str] = Annotated[tf.RaggedTensor, tf.int32, Shape]
+    type Tensor[Shape: str] = FTensor[Shape] | ITensor[Shape]
+    type RaggedTensor[Shape: str] = FRTensor[Shape] | IRTensor[Shape]
+    type GenericTensor[Shape: str] = Tensor[Shape] | RaggedTensor[Shape]
+
+    type TensorCompatible = (
+        tf.Tensor
+        | str
+        | float
+        | np.ndarray[Any, Any]
+        | np.number[Any]
+        | Sequence[TensorCompatible]
+    )
 
     # --- Encoder Tensors ---
     EncoderInputsShape = tuple[tuple[int, int, int], tuple[int, int, int]]
@@ -85,55 +97,27 @@ if TYPE_CHECKING:
         ITensor[S["batch_dim nspec_dim wl_dim"]],  # mask
     ]
 
-    # --- Layers ---
-    # Generic Types
-    type Tensor[Shape] = (
-        Annotated[tf.Tensor, tf.float32, Shape] | Annotated[tf.Tensor, tf.int32, Shape]
-    )
-    type RaggedTensor[Shape] = (
-        Annotated[tf.RaggedTensor, tf.float32, Shape]
-        | Annotated[tf.RaggedTensor, tf.int32, Shape]
-    )
-
-    from tensorflow._aliases import TensorCompatible
-
 
 class TypedLayer[
-    L: ks.layers.Layer,
-    I: Tensor | RaggedTensor,
-    O: Tensor | RaggedTensor,
+    L: "ks.layers.Layer[tf.Tensor, tf.Tensor]",
+    I: "GenericTensor[str]",
+    O: "GenericTensor[str]",
 ](ks.layers.Layer):
-    def __init__(self, layer: L, **kwargs: "Any") -> None:
+    def __init__(self, layer: "ks.layers.Layer[I, O]", **kwargs: "Any") -> None:
         super().__init__(**kwargs)
-        self.layer: L = layer
+        self.layer: "ks.layers.Layer[I, O]" = layer
 
     @override
-    def call(self, inputs: I, *args: "Any", **kwargs: "Any") -> O:
+    def build(self, input_shape: "Any", *args: "Any", **kwargs: "Any") -> None:
+        self.layer.build(input_shape, *args, **kwargs)
+
+    @override
+    def call(self, inputs: "I", *args: "Any", **kwargs: "Any") -> "O":
         return self.layer(inputs, *args, **kwargs)
 
     @override
-    def compute_output_shape(self, input_shape):
-        return self.layer.compute_output_shape(input_shape)
-
-    @override
-    def get_config(self) -> dict[str, "Any"]:
-        config = super().get_config()
-        # Optionally serialize the wrapped layer
-        config.update({
-            "layer": ks.layers.serialize(self.layer),
-        })
-        return config
-
-    @override
-    @classmethod
-    def from_config(cls, config: dict[str, "Any"]) -> Self:
-        layer_config = config.pop("layer")
-        layer = ks.layers.deserialize(layer_config)
-        return cls(layer=layer, **config)
-
-    @override
-    def __call__(self, x: I, *args: "Any", **kwargs: "Any") -> O:
-        return self.layer(x, *args, **kwargs)
+    def __call__(self, inputs: "I", *args: "Any", **kwargs: "Any") -> "O":
+        return self.layer(inputs, *args, **kwargs)
 
 
 @keras.saving.register_keras_serializable("SuPAErnova")
@@ -151,8 +135,11 @@ class TFPAEEncoder(ks.layers.Layer):
         n_physical: Literal[0, 3] = 3 if options.physical_latents else 0
         n_zs: int = options.n_z_latents
         self.n_latents: int = n_physical + n_zs
-        self.latents_z_mask: ITensor[Literal["{self.n_latents}"]]
-        self.latents_physical_mask: ITensor[Literal["{self.n_latents}"]]
+        self.latents_z_mask: ITensor[Literal["n_latents"]]
+        self.latents_physical_mask: ITensor[Literal["n_latents"]]
+
+        self.stage_num: int
+        self.moving_means: FTensor[Literal["n_latents"]]
 
         # Mask tensors to select specific latents
         if n_physical > 0:
@@ -322,6 +309,22 @@ class TFPAEEncoder(ks.layers.Layer):
             latents = cast("FTensor[S['batch_dim n_latents']]", latents)
 
         if training:
+            # Mask latents which aren't being trained
+            # The latents are ordered by training stage
+            # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅
+            masked_latents = tf.zeros(self.n_latents - self.stage_num)
+            if TYPE_CHECKING:
+                masked_latents = cast(
+                    "FTensor[S['n_latents-stage_num']]", masked_latents
+                )
+            unmasked_latents = tf.ones(self.stage_num)
+            if TYPE_CHECKING:
+                unmasked_latents = cast("FTensor[S['stage_num']]", unmasked_latents)
+            latent_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
+            if TYPE_CHECKING:
+                latent_mask = cast("FTensor[S['n_latents']]", latent_mask)
+            latents *= latent_mask
+
             # Normalise the physical latents within this batch such that they have a mean of 0
             latents_sum = tf.reduce_sum(latents, axis=0, keepdims=True)
             latents_num = tf.reduce_sum(tf.ones_like(latents), axis=0, keepdims=True)
@@ -331,10 +334,18 @@ class TFPAEEncoder(ks.layers.Layer):
                 latents_sum = cast("FTensor[S['1 n_latents']]", latents_sum)
                 latents_num = cast("FTensor[S['1 n_latents']]", latents_num)
                 latents_mean = cast("FTensor[S['1 n_latents']]", latents_mean)
-                latents = cast("FTensor[S['batch_dim n_latents']]", latents)
+        else:
+            # Normalise the physical latents within this batch such that the entire unbatched sample has a mean of 0
+            latents -= self.latents_physical_mask * self.moving_means
+        if TYPE_CHECKING:
+            latents = cast("FTensor[S['batch_dim n_latents']]", latents)
 
         # Repeat latent layers across NSpecDim
-        return self.repeat_latent_layer(latents)
+        encoded = self.repeat_latent_layer(latents)
+        if TYPE_CHECKING:
+            encoded = cast("FTensor[S['batch_dim nspec_dim n_latents']]", encoded)
+
+        return encoded
 
 
 @keras.saving.register_keras_serializable("SuPAErnova")
@@ -549,6 +560,8 @@ class TFPAEModel(ks.Model):
         # --- Training ---
         self.batch_size: int = options.batch_size
         self.save_best: bool = options.save_best
+        self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
+        self.model_path: str = f"{'best' if self.save_best else 'latest'}.model.keras"
 
         # Data Offsets
         self.phase_offset_scale: Literal[0, -1] | float = options.phase_offset_scale
@@ -562,7 +575,7 @@ class TFPAEModel(ks.Model):
         self._loss: ks.losses.Loss = options.loss_cls()
 
         self.stage: Stage
-        self._epoch: int
+        self._epoch: int = 0
 
         # --- Metrics ---
         self.loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss")
@@ -589,27 +602,6 @@ class TFPAEModel(ks.Model):
 
         input_phase = inputs[0]
         encoded = self.encoder(inputs, training=training, mask=mask)
-        if TYPE_CHECKING:
-            encoded = cast("FTensor[S['batch_dim nspec_dim n_latents']]", encoded)
-        if training:
-            # Mask latents which aren't being trained
-            # The latents are ordered by training stage
-            # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅
-            masked_latents = tf.zeros(self.n_latents - self.stage.stage)
-            if TYPE_CHECKING:
-                masked_latents = cast(
-                    "FTensor[S['n_latents-stage_num']]", masked_latents
-                )
-            unmasked_latents = tf.ones(self.stage.stage)
-            if TYPE_CHECKING:
-                unmasked_latents = cast("FTensor[S['stage_num']]", unmasked_latents)
-            latent_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
-            if TYPE_CHECKING:
-                latent_mask = cast("FTensor[S['n_latents']]", latent_mask)
-            encoded *= latent_mask
-        else:
-            # Normalise the physical latents within this batch such that the entire unbatched sample has a mean of 0
-            encoded -= tf.convert_to_tensor(self.stage.moving_means)
         if TYPE_CHECKING:
             encoded = cast("FTensor[S['batch_dim nspec_dim n_latents']]", encoded)
 
@@ -646,9 +638,9 @@ class TFPAEModel(ks.Model):
         self,
         data: "TensorCompatible",
     ) -> dict[str, tf.Tensor | dict[str, tf.Tensor]]:
-        # === Per Epoch Setup ===
-        training = self.stage.training
+        training = True
 
+        # === Per Epoch Setup ===
         # Fixed RNG
         tf.random.set_seed(self._epoch)
         self._epoch += 1
@@ -691,22 +683,34 @@ class TFPAEModel(ks.Model):
     ) -> ks.callbacks.History:
         self.stage = stage
 
+        # === Setup Encoder ===
+        self.encoder.stage_num = self.stage.stage
+        self.encoder.moving_means = tf.convert_to_tensor(self.stage.moving_means)
+
         # === Setup Callbacks ===
         callbacks: list[ks.callbacks.Callback] = []
 
-        # --- Backup & Restore ---
-        # Backup checkpoints each epoch and restore if training got cancelled midway through
-        if not self.force:
-            backup_dir = stage.savepath / "backups"
-            backup_callback = ks.callbacks.BackupAndRestore(str(backup_dir))
-            callbacks.append(backup_callback)
+        if self.stage.savepath is not None:
+            # --- Backup & Restore ---
+            # Backup checkpoints each epoch and restore if training got cancelled midway through
+            if not self.force:
+                backup_dir = self.stage.savepath / "backups"
+                backup_callback = ks.callbacks.BackupAndRestore(str(backup_dir))
+                callbacks.append(backup_callback)
 
-        # --- Early Stopping ---
-        # Stop early if a given metric stops improving
-        # TODO: ks.callbacks.EarlyStopping
+            # --- Model Checkpoint ---
+            checkpoint_callback = ks.callbacks.ModelCheckpoint(
+                str(self.stage.savepath / self.weights_path),
+                save_best_only=self.save_best,
+                save_weights_only=True,
+            )
+            callbacks.append(checkpoint_callback)
+
+        # --- Terminate on NaN ---
+        # Terminate training when a NaN loss is encountered
+        callbacks.append(ks.callbacks.TerminateOnNaN())
 
         # === Setup Training ===
-        self._epoch = 0
         schedule = self._scheduler(
             initial_learning_rate=self.stage.learning_rate,
             decay_steps=self.stage.learning_rate_decay_steps,
@@ -723,23 +727,22 @@ class TFPAEModel(ks.Model):
             run_eagerly=self.stage.debug,
         )
 
-        self.log.debug("Trainable variables before building:")
-        for var in self.trainable_variables:
-            self.log.debug(f"{var.name}: {var.shape}")
-        self.summary(print_fn=self.log.debug)  # Will show number of parameters
-
         # === Build ===
         self(
             (self.stage.train_data.phase, self.stage.train_data.amplitude),
-            training=stage.training,
+            training=False,
             mask=self.stage.train_data.mask,
         )
 
-        self.log.debug("Trainable variables after building:")
+        self.log.debug("Trainable variables:")
         for var in self.trainable_variables:
             self.log.debug(f"{var.name}: {var.shape}")
         self.summary(print_fn=self.log.debug)  # Will show number of parameters
 
+        if stage.loadpath is not None:
+            self.load_checkpoint(stage.loadpath)
+
+        # === Prep Data ===
         data = (
             self.stage.train_data.phase,
             self.stage.train_data.dphase,
@@ -747,20 +750,53 @@ class TFPAEModel(ks.Model):
             self.stage.train_data.sigma,
             self.stage.train_data.mask,
         )
-
         prep = self.prep_data(data)
 
         # === Train ===
-        history = self.fit(
+        self._epoch = 0
+        return self.fit(
             x=data,
             y=prep,
             initial_epoch=self._epoch,
             epochs=self.stage.epochs,
             batch_size=self.batch_size,
             callbacks=callbacks,
+            # verbose=0,
         )
-        self.save(stage.savepath / "checkpoints.model.h5")
-        return history
+
+    def save_checkpoint(self) -> None:
+        # Normalise mean of physical latents to 0 across all batches
+        if self.n_physical > 0:
+            phase = tf.convert_to_tensor(self.stage.train_data.phase)
+            amplitude = tf.convert_to_tensor(self.stage.train_data.amplitude)
+            mask = tf.convert_to_tensor(self.stage.train_data.mask)
+            encoded = self.encoder((phase, amplitude), training=False, mask=mask)
+            if TYPE_CHECKING:
+                encoded = cast("FTensor[S['n_sn nspec_dim n_latents']]", encoded)
+
+            latents_sum = tf.reduce_sum(tf.reduce_sum(encoded, axis=0), axis=0)
+            latents_num = tf.reduce_sum(
+                tf.reduce_sum(tf.ones_like(encoded), axis=0), axis=0
+            )
+            moving_means = latents_sum / latents_num
+            if TYPE_CHECKING:
+                latents_sum = cast("FTensor[S['n_latents']]", latents_sum)
+                latents_num = cast("FTensor[S['n_latents']]", latents_num)
+                moving_means = cast("FTensor[S['n_latents']]", moving_means)
+            self.encoder.moving_means = moving_means
+        if self.stage.savepath is not None:
+            self.save_weights(self.stage.savepath / self.weights_path)
+            self.save(self.stage.savepath / self.model_path)
+
+    def load_checkpoint(self, loadpath: "Path") -> None:
+        init_weights = self.encoder.encode_output_layer.get_weights()[0]
+        self.load_weights(loadpath / self.weights_path)
+        weights = self.encoder.encode_output_layer.get_weights()[0]
+
+        # Set the weights of the newly introduced latent parameter to effectively 0
+        #   Since the initial weights are random values which we then divide by 100
+        weights[:, self.stage.stage - 1] = init_weights[:, self.stage.stage - 1] / 100
+        self.encoder.encode_output_layer.set_weights([weights])
 
     def prep_data(self, data: "RawData") -> "PrepData":
         (_phase, _d_phase, _amplitude, _d_amplitude, mask) = data
@@ -880,12 +916,12 @@ class TFPAEModel(ks.Model):
             inds_to_shuffle = cast("ITensor[S['n_to_shuffle 2']]", inds_to_shuffle)
 
         # For each spectrum we will shuffle, get the index of its corresponding SN
-        sn_inds: Tensor[tuple[int]] = inds_to_shuffle[:, 0]
+        sn_inds = inds_to_shuffle[:, 0]
         if TYPE_CHECKING:
             sn_inds = cast("ITensor[S['n_to_shuffle']]", sn_inds)
 
         # For each spectrum we will shuffle, get its index
-        spec_inds_to_shuffle: Tensor[tuple[int]] = inds_to_shuffle[:, 1]
+        spec_inds_to_shuffle = inds_to_shuffle[:, 1]
         if TYPE_CHECKING:
             spec_inds_to_shuffle = cast(
                 "ITensor[S['n_to_shuffle']]", spec_inds_to_shuffle

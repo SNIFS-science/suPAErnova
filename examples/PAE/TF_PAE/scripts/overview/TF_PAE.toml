@@ -49,11 +49,6 @@
         optimiser                  = "AdamW"
         scheduler                  = "ExponentialDecay"
 
-    # Each model variant is provided with a different kfold.
-    [[pae.variant]]
-        name = "NewSeed"
-        seed = 98765
-
     [[pae.variant]]
         name = "PhysicalLatents"
 
@@ -63,9 +58,3 @@
         name = "ZLatents"
 
         physical_latents = false
-
-        # [[pae.variant]]
-        #     name = "No latents"
-        #
-        #     n_z_latents      = 0
-        #     physical_latents = false

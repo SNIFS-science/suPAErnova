@@ -1,8 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 
 from typing import TYPE_CHECKING, ClassVar, final, get_args, override
-from pathlib import Path
-import tempfile as tmp
+from pathlib import Path  # noqa: TC003
 
 import numpy as np
 from pydantic import (  # noqa: TC002
@@ -29,9 +28,9 @@ class Stage(BaseModel):
     stage: PositiveInt
     name: str
     fname: str
-    savepath: Path = Path(tmp.gettempdir())
+    savepath: "Path | None" = None
+    loadpath: "Path | None" = None
 
-    training: bool = True
     epochs: PositiveInt
     debug: bool = False
 
@@ -44,7 +43,7 @@ class Stage(BaseModel):
     test_data: SNPAEData
     val_data: SNPAEData
 
-    moving_means: list[float] = []
+    moving_means: list[float]
 
 
 @final
@@ -154,6 +153,7 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
             "train_data": self.train_data,
             "test_data": self.test_data,
             "val_data": self.val_data,
+            "moving_means": [0 for _ in range(self.n_latents)],
         }
 
         self.stage_delta_av = Stage.model_validate({
@@ -242,16 +242,16 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
     @override
     def _run(self) -> None:
         model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
         savepath: Path | None = None
-        for stage in self.run_stages:
-            if savepath is not None:
-                self.log.debug("Loading checkpoint from previous stage")
+        for i, stage in enumerate(self.run_stages):
+            self.model = model_cls(self)
+            self.log.debug(f"Starting Stage {i}: {stage.name}")
+            if savepath is not None and i != len(self.run_stages):
+                stage.loadpath = savepath
             savepath = self.paths.out / self.model.name / stage.fname
             stage.savepath = savepath
-            self.log.debug(f"Starting the {stage.name} training stage")
             self.model.train_model(stage)
-            # TODO: Save and load checkpoints
+            self.model.save_checkpoint()
 
     @override
     def _result(self) -> None:

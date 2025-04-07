@@ -1,4 +1,4 @@
-from typing import Concatenate, override
+from typing import Any, Concatenate, override
 from functools import cached_property
 from collections.abc import Callable
 
@@ -80,6 +80,10 @@ class TFPAEModelConfig(PAEModelConfig):
             return regulariser
 
         class CustomRegulariser(ks.regularizers.Regularizer):
+            @override
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+
             @override
             def __call__(self, x: tf.Tensor) -> tf.Tensor:
                 return regulariser(x)
