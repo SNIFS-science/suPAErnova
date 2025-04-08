@@ -32,7 +32,7 @@ class Stage(BaseModel):
     loadpath: "Path | None" = None
 
     epochs: PositiveInt
-    debug: bool = False
+    debug: bool
 
     learning_rate: PositiveFloat
     learning_rate_decay_steps: PositiveInt
@@ -70,6 +70,8 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
 
         self.seperate_latent_training: bool
         self.seperate_z_latent_training: bool
+
+        self.debug: bool
 
         # Optional
         self.min_train_redshift: NonNegativeFloat
@@ -122,6 +124,8 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.seperate_latent_training = self.options.seperate_latent_training
         self.seperate_z_latent_training = self.options.seperate_z_latent_training
 
+        self.debug = self.options.debug
+
         # Optional
         self.min_train_redshift = self.options.min_train_redshift
         self.max_train_redshift = self.options.max_train_redshift
@@ -154,6 +158,7 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
             "test_data": self.test_data,
             "val_data": self.val_data,
             "moving_means": [0 for _ in range(self.n_latents)],
+            "debug": self.debug,
         }
 
         self.stage_delta_av = Stage.model_validate({
@@ -233,11 +238,30 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
 
     @override
     def _completed(self) -> bool:
-        return False
+        model_cls = get_args(self.__orig_class__)[0]
+        self.model = model_cls(self)
+        final_stage = self.run_stages[-1]
+        final_savepath = (
+            self.paths.out / self.model.name / final_stage.fname / self.model.model_path
+        )
+
+        if not final_savepath.exists():
+            self.log.debug(
+                f"{self.name} has not completed as {final_savepath} does not exist"
+            )
+            return False
+        return True
 
     @override
     def _load(self) -> None:
-        pass
+        model_cls = get_args(self.__orig_class__)[0]
+        self.model = model_cls(self)
+
+        final_stage = self.run_stages[-1]
+        final_savepath = self.paths.out / self.model.name / final_stage.fname
+
+        self.log.debug(f"Loading final PAE model weights from {final_savepath}")
+        self.model.load_checkpoint(final_savepath, reset_weights=False)
 
     @override
     def _run(self) -> None:
@@ -246,12 +270,21 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         for i, stage in enumerate(self.run_stages):
             self.model = model_cls(self)
             self.log.debug(f"Starting Stage {i}: {stage.name}")
-            if savepath is not None and i != len(self.run_stages):
+            if savepath is not None:
                 stage.loadpath = savepath
             savepath = self.paths.out / self.model.name / stage.fname
             stage.savepath = savepath
-            self.model.train_model(stage)
-            self.model.save_checkpoint()
+
+            model_path = savepath / self.model.model_path
+            weights_path = savepath / self.model.weights_path
+            if model_path.exists() and not self.force:
+                # Don't retrain stages if you don't need to
+                self.log.debug(f"Loading stage weights from {weights_path}")
+                self.model.stage = stage
+                self.model.load_checkpoint(savepath, reset_weights=False)
+            else:
+                self.model.train_model(stage)
+            self.model.save_checkpoint(savepath)
 
     @override
     def _result(self) -> None:

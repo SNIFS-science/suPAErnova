@@ -17,6 +17,7 @@
 
         # === Required ===
         backend = "tf"
+        debug   = false
 
         # --- Network Design ---
         architecture = "dense"
@@ -48,6 +49,18 @@
         loss                       = "MeanAbsoluteError"
         optimiser                  = "AdamW"
         scheduler                  = "ExponentialDecay"
+
+        # Loss
+        loss_residual_penalty = 0
+
+        loss_delta_av_penalty = 0
+        loss_delta_m_penalty  = 0
+        loss_delta_p_penalty  = 0
+
+        loss_covariance_penalty = 0
+        loss_decorrelate_all    = false
+        loss_decorrelate_dust   = false
+
 
     [[pae.variant]]
         name = "PhysicalLatents"

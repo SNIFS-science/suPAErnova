@@ -1,6 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 from typing import (
     TYPE_CHECKING,
+    Self,
     cast,
     override,
 )
@@ -9,6 +10,7 @@ import keras
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras as ks
+import tensorflow_probability as tfp
 
 if TYPE_CHECKING:
     from typing import (
@@ -135,20 +137,11 @@ class TFPAEEncoder(ks.layers.Layer):
         n_physical: Literal[0, 3] = 3 if options.physical_latents else 0
         n_zs: int = options.n_z_latents
         self.n_latents: int = n_physical + n_zs
-        self.latents_z_mask: ITensor[Literal["n_latents"]]
-        self.latents_physical_mask: ITensor[Literal["n_latents"]]
+        self.latents_z_mask: ITensor[S["n_latents"]]
+        self.latents_physical_mask: ITensor[S["n_latents"]]
 
         self.stage_num: int
-        self.moving_means: FTensor[Literal["n_latents"]]
-
-        # Mask tensors to select specific latents
-        if n_physical > 0:
-            self.latents_z_mask = tf.concat(
-                (tf.zeros(1), tf.ones(n_zs), tf.zeros(1), tf.zeros(1)), axis=0
-            )
-        else:
-            self.latents_z_mask = tf.ones(n_zs)
-        self.latents_physical_mask = tf.abs(self.latents_z_mask - 1)  # Swap 0s and 1s
+        self.moving_means: FTensor[S["n_latents"]]
 
         self.encode_dims: list[int] = options.encode_dims
 
@@ -164,38 +157,38 @@ class TFPAEEncoder(ks.layers.Layer):
         self.encode_layers: list[
             TypedLayer[
                 ks.layers.Dense,
-                FTensor[Literal["batch_dim nspec_dim _"]],
-                FTensor[Literal["batch_dim nspec_dim encode_dim"]],
+                FTensor[S["batch_dim nspec_dim _"]],
+                FTensor[S["batch_dim nspec_dim encode_dim"]],
             ]
         ] = []
         self.dropout_layers: list[
             TypedLayer[
                 ks.layers.Dropout | ks.layers.Identity,
-                FTensor[Literal["batch_dim nspec_dim encode_dim"]],
-                FTensor[Literal["batch_dim nspec_dim encode_dim"]],
+                FTensor[S["batch_dim nspec_dim encode_dim"]],
+                FTensor[S["batch_dim nspec_dim encode_dim"]],
             ]
         ] = []
         self.batch_normalisation_layers: list[
             TypedLayer[
                 ks.layers.BatchNormalization | ks.layers.Identity,
-                FTensor[Literal["batch_dim nspec_dim encode_dim"]],
-                FTensor[Literal["batch_dim nspec_dim encode_dim"]],
+                FTensor[S["batch_dim nspec_dim encode_dim"]],
+                FTensor[S["batch_dim nspec_dim encode_dim"]],
             ]
         ] = []
         self.encode_nspec_layer: TypedLayer[
             ks.layers.Dense,
-            FTensor[Literal["batch_dim nspec_dim encode_dim"]],
-            FTensor[Literal["batch_dim nspec_dim nspec_dim"]],
+            FTensor[S["batch_dim nspec_dim encode_dim"]],
+            FTensor[S["batch_dim nspec_dim nspec_dim"]],
         ]
         self.encode_output_layer: TypedLayer[
             ks.layers.Dense,
-            FTensor[Literal["batch_dim nspec_dim nspec_dim"]],
-            FTensor[Literal["batch_dim nspec_dim n_latents"]],
+            FTensor[S["batch_dim nspec_dim nspec_dim"]],
+            FTensor[S["batch_dim nspec_dim n_latents"]],
         ]
         self.repeat_latent_layer: TypedLayer[
             ks.layers.RepeatVector,
-            FTensor[Literal["batch_dim n_latents"]],
-            FTensor[Literal["batch_dim nspec_dim n_latents"]],
+            FTensor[S["batch_dim n_latents"]],
+            FTensor[S["batch_dim nspec_dim n_latents"]],
         ]
 
     @override
@@ -312,6 +305,8 @@ class TFPAEEncoder(ks.layers.Layer):
             # Mask latents which aren't being trained
             # The latents are ordered by training stage
             # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅
+            # Note that this differs from the order used in the legacy SuPAErnova code:
+            # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs
             masked_latents = tf.zeros(self.n_latents - self.stage_num)
             if TYPE_CHECKING:
                 masked_latents = cast(
@@ -538,9 +533,10 @@ class TFPAEModel(ks.Model):
     def __init__(
         self,
         config: "PAEModel[TFPAEModel]",
+        *args: "Any",
         **kwargs: "Any",
     ) -> None:
-        super().__init__(name=f"{config.name.split()[-1]}PAEModel", **kwargs)
+        super().__init__(*args, name=f"{config.name.split()[-1]}PAEModel", **kwargs)
         # --- Config ---
         options = cast("TFPAEModelConfig", config.options)
         self.log: Logger = config.log
@@ -574,12 +570,34 @@ class TFPAEModel(ks.Model):
         self._optimiser: type[ks.optimizers.Optimizer] = options.optimiser_cls
         self._loss: ks.losses.Loss = options.loss_cls()
 
+        self.built: bool = False
         self.stage: Stage
+        self.latents_z_mask: ITensor[S["n_latents"]]
+        self.latents_physical_mask: ITensor[S["n_latents"]]
         self._epoch: int = 0
+
+        # --- Loss ---
+        self._loss_terms: FTensor[S["4"]]
+        self.loss_residual_penalty: float = options.loss_residual_penalty
+
+        self.loss_delta_av_penalty: float = options.loss_delta_av_penalty
+        self.loss_delta_m_penalty: float = options.loss_delta_m_penalty
+        self.loss_delta_p_penalty: float = options.loss_delta_p_penalty
+        self.loss_physical_penalty: float = sum((
+            self.loss_delta_av_penalty,
+            self.loss_delta_m_penalty,
+            self.loss_delta_p_penalty,
+        ))  # Only calculate physical latent penalties if at least one penalty scaling is > 0
+
+        self.loss_covariance_penalty: float = options.loss_covariance_penalty
+        self.loss_decorrelate_all: bool = options.loss_decorrelate_all
+        self.loss_decorrelate_dust: bool = options.loss_decorrelate_dust
 
         # --- Metrics ---
         self.loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss")
-        self.mae_metric: ks.metrics.Metric = ks.metrics.MeanAbsoluteError(name="mae")
+        self.recon_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="recon_loss")
+        self.model_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="model_loss")
+        self.cov_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="cov_loss")
 
     @property
     @override
@@ -589,7 +607,14 @@ class TFPAEModel(ks.Model):
         # or at the start of `evaluate()`.
         # If you don't implement this property, you have to call
         # `reset_states()` yourself at the time of your choosing.
-        return [self.loss_tracker, self.mae_metric]
+        metrics = [
+            self.loss_tracker,
+            self.recon_loss_tracker,
+            self.model_loss_tracker,
+        ]
+        if self.loss_covariance_penalty > 0:
+            metrics.append(self.cov_loss_tracker)
+        return metrics
 
     @override
     def call(
@@ -597,7 +622,7 @@ class TFPAEModel(ks.Model):
         inputs: "EncoderInputs",
         training: bool | None = None,
         mask: "TensorCompatible | None" = None,
-    ) -> "DecoderOutputs":
+    ) -> "tuple[EncoderOutputs, DecoderOutputs]":
         training = False if training is None else training
 
         input_phase = inputs[0]
@@ -609,7 +634,7 @@ class TFPAEModel(ks.Model):
         if TYPE_CHECKING:
             decoded = cast("FTensor[S['batch_dim nspec_dim wl_dim']]", decoded)
 
-        return decoded
+        return encoded, decoded
 
     @override
     def compute_loss(
@@ -619,18 +644,152 @@ class TFPAEModel(ks.Model):
         y_pred: "TensorCompatible | None" = None,
         sample_weight: "Any | None" = None,
         training: bool | None = None,
+        mask: "TensorCompatible | None" = None,
     ) -> "FTensor[S['']] | None":
-        training = False if training is None else training
         if y is None or y_pred is None:
             return None
-        loss = self._loss(y_true=y, y_pred=y_pred)
+        training = False if training is None else training
+
+        latents = tf.convert_to_tensor(x)
+        input_amp = tf.convert_to_tensor(y)
+        output_amp = tf.convert_to_tensor(y_pred)
+        input_mask = tf.cast(
+            (mask if mask is not None else tf.ones_like(input_amp, dtype=tf.int32)),
+            tf.float32,
+        )
+        latents_mask = tf.reduce_max(
+            tf.reduce_min(input_mask, axis=-1, keepdims=True), axis=-2
+        )
+
+        if TYPE_CHECKING:
+            latents = cast("FTensor[S['batch_dim nspec_dim n_latents']]", latents)
+            input_amp = cast("FTensor[S['batch_dim nspec_dim wl_dim']]", input_amp)
+            output_amp = cast("FTensor[S['batch_dim nspec_dim wl_dim']]", output_amp)
+            input_mask = cast("ITensor[S['batch_dim nspec_dim wl_dim']]", input_mask)
+            latents_mask = cast("FTensor[S['batch_dim 1']]", latents_mask)
+
+        loss = self._loss(y_true=input_amp, y_pred=output_amp)
         if TYPE_CHECKING:
             loss = cast("FTensor[S['']]", loss)
-        overall_loss = loss
-        recon_loss = loss
-        covariant_loss = loss
-        # TODO: Other loss terms
 
+        original_loss = loss
+        model_loss = tf.reduce_sum(self.losses)
+        cov_loss = tf.constant(0.0)
+
+        loss += model_loss
+
+        # --- Penalties ---
+        # Penalise larger residuals between the input amplitude and the output amplitude
+        if self.loss_residual_penalty > 0:
+            residual_penalty: "FTensor[S['batch_dim']]" = (
+                self.loss_residual_penalty
+                * tf.reduce_sum(
+                    tf.abs(
+                        tf.reduce_mean(
+                            input_mask * (input_amp - output_amp), axis=(-1, -2)
+                        )
+                    )
+                )
+            )
+            loss += residual_penalty
+
+        # Penalise phyical latents which are far from unity (one for multiplicative, zero for additive)
+        if self.n_physical > 0 and self.loss_physical_penalty > 0:
+            latents_penalty_scale = tf.concat(
+                (
+                    tf.constant((self.loss_delta_av_penalty,)),
+                    tf.zeros(self.n_zs),
+                    tf.constant((self.loss_delta_m_penalty,)),
+                    tf.constant((self.loss_delta_p_penalty,)),
+                ),
+                axis=0,
+            )
+            preferred_latent_values = tf.concat(
+                (
+                    tf.constant((1.0,)),  # ΔAᵥ = 1
+                    tf.zeros(self.n_zs),
+                    tf.constant((0.0,)),  # Δℳ  = 0
+                    tf.constant((0.0,)),  # Δ𝓅 = 0
+                ),
+                axis=0,
+            )
+            median_latent_values_per_sn = latents_mask * tfp.stats.percentile(
+                latents,
+                50,
+                interpolation="midpoint",
+                axis=[1],
+            )
+            median_latent_values = tfp.stats.percentile(
+                median_latent_values_per_sn,
+                50,
+                interpolation="midpoint",
+                axis=[0],
+            )
+            physical_latents_offset = (
+                preferred_latent_values - median_latent_values
+            ) ** 2
+            physical_latents_penalty = tf.reduce_sum(
+                self.latents_physical_mask
+                * latents_penalty_scale
+                * physical_latents_offset
+            )
+            loss += physical_latents_penalty
+
+        if self.loss_covariance_penalty > 0:
+            eps = tf.constant(1e-10)
+            masked_latents = latents[:, 0, :] * latents_mask
+            num_masked_latents = tf.reduce_sum(latents_mask)
+            latents_mean = (
+                tf.reduce_sum(masked_latents, axis=0, keepdims=True)
+                / num_masked_latents
+            )
+            latents_norm = masked_latents - latents_mean
+            latents_cov = (
+                tf.matmul(latents_norm, latents_norm, transpose_a=True)
+                / num_masked_latents
+            )
+            latents_var = tf.reduce_sum(latents_norm**2, axis=0) / num_masked_latents
+            std_outer = (
+                tf.sqrt(
+                    tf.matmul(
+                        tf.expand_dims(latents_var, -1), tf.expand_dims(latents_var, 0)
+                    )
+                )
+                + eps
+            )
+            latents_cov_norm = latents_cov / std_outer
+
+            latent_dim = tf.shape(latents_cov_norm)[0]
+            cov_mask = 1.0 - tf.eye(latent_dim)
+
+            # Decorrelate all -> Punish all latents for off-diagonal terms
+            if not self.loss_decorrelate_all:
+                decorrelate = tf.concat(
+                    (
+                        tf.constant((
+                            1.0 if self.loss_decorrelate_dust else 0.0,
+                        )),  # delta_av,
+                        tf.zeros(self.n_zs),  # zs
+                        tf.constant((1.0,)),  # delta_m,
+                        tf.constant((0.0,)),  # delta_p,
+                    ),
+                    axis=0,
+                )
+                cov_mask *= tf.expand_dims(decorrelate, axis=0)
+                cov_mask += tf.transpose(cov_mask)
+                cov_mask = tf.clip_by_value(cov_mask, 0.0, 1.0)
+
+            loss_cov = tf.reduce_sum(
+                tf.square(latents_cov_norm * cov_mask)
+            ) / tf.reduce_sum(cov_mask)
+            loss_covariance_penalty = self.loss_covariance_penalty * loss_cov
+            cov_loss = loss_covariance_penalty
+            loss += loss_covariance_penalty
+
+        loss_terms = [loss, original_loss, model_loss]
+        if self.loss_covariance_penalty > 0:
+            loss_terms.append(cov_loss)
+        self._loss_terms = tf.stack(loss_terms)
         return loss
 
     @override
@@ -651,13 +810,20 @@ class TFPAEModel(ks.Model):
         )
 
         with tf.GradientTape() as tape:
-            output_amp = self((phase, amplitude), training=training, mask=mask)
+            latents, pred_amplitude = self(
+                (phase, amplitude), training=training, mask=mask
+            )
             if TYPE_CHECKING:
-                output_amp = cast(
-                    "FTensor[S['batch_dim nspec_dim wl_dim']]", output_amp
+                latents = cast("FTensor[S['batch_dim nspec_dim n_latents']]", latents)
+                pred_amplitude = cast(
+                    "FTensor[S['batch_dim nspec_dim wl_dim']]", pred_amplitude
                 )
             loss = self.compute_loss(
-                x=phase, y=amplitude, y_pred=output_amp, training=training
+                x=latents,
+                y=amplitude,
+                y_pred=pred_amplitude,
+                training=training,
+                mask=mask,
             )
         if loss is None:
             return {m.name: m.result() for m in self.metrics}
@@ -668,11 +834,11 @@ class TFPAEModel(ks.Model):
         )
 
         # Update metrics (includes the metric that tracks the loss)
-        for metric in self.metrics:
-            if metric.name == "loss":
-                metric.update_state(loss)
+        for i, metric in enumerate(self.metrics):
+            if "loss" in metric.name:
+                metric.update_state(self._loss_terms[i])
             else:
-                metric.update_state(amplitude, output_amp)
+                metric.update_state(amplitude, pred_amplitude)
 
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
@@ -682,10 +848,6 @@ class TFPAEModel(ks.Model):
         stage: "Stage",
     ) -> ks.callbacks.History:
         self.stage = stage
-
-        # === Setup Encoder ===
-        self.encoder.stage_num = self.stage.stage
-        self.encoder.moving_means = tf.convert_to_tensor(self.stage.moving_means)
 
         # === Setup Callbacks ===
         callbacks: list[ks.callbacks.Callback] = []
@@ -710,37 +872,10 @@ class TFPAEModel(ks.Model):
         # Terminate training when a NaN loss is encountered
         callbacks.append(ks.callbacks.TerminateOnNaN())
 
-        # === Setup Training ===
-        schedule = self._scheduler(
-            initial_learning_rate=self.stage.learning_rate,
-            decay_steps=self.stage.learning_rate_decay_steps,
-            decay_rate=self.stage.learning_rate_decay_rate,
-        )
-        optimiser = self._optimiser(
-            learning_rate=schedule,
-            weight_decay=self.stage.learning_rate_weight_decay_rate,
-        )
-        loss = self._loss
-        self.compile(
-            optimizer=optimiser,
-            loss=loss,
-            run_eagerly=self.stage.debug,
-        )
-
-        # === Build ===
-        self(
-            (self.stage.train_data.phase, self.stage.train_data.amplitude),
-            training=False,
-            mask=self.stage.train_data.mask,
-        )
-
-        self.log.debug("Trainable variables:")
-        for var in self.trainable_variables:
-            self.log.debug(f"{var.name}: {var.shape}")
-        self.summary(print_fn=self.log.debug)  # Will show number of parameters
-
         if stage.loadpath is not None:
             self.load_checkpoint(stage.loadpath)
+        else:
+            self.build_model()
 
         # === Prep Data ===
         data = (
@@ -764,7 +899,53 @@ class TFPAEModel(ks.Model):
             # verbose=0,
         )
 
-    def save_checkpoint(self) -> None:
+    def build_model(self) -> None:
+        if not self.built:
+            # Mask tensors to select specific latents
+            if self.n_physical > 0:
+                self.latents_z_mask = tf.concat(
+                    (tf.zeros(1), tf.ones(self.n_zs), tf.zeros(1), tf.zeros(1)), axis=0
+                )
+            else:
+                self.latents_z_mask = tf.ones(self.n_zs)
+            self.latents_physical_mask = tf.abs(
+                self.latents_z_mask - 1
+            )  # Swap 0s and 1s
+
+            # === Setup Encoder ===
+            self.encoder.stage_num = self.stage.stage
+            self.encoder.moving_means = tf.convert_to_tensor(self.stage.moving_means)
+            self.encoder.latents_z_mask = self.latents_z_mask
+            self.encoder.latents_physical_mask = self.latents_physical_mask
+
+            schedule = self._scheduler(
+                initial_learning_rate=self.stage.learning_rate,
+                decay_steps=self.stage.learning_rate_decay_steps,
+                decay_rate=self.stage.learning_rate_decay_rate,
+            )
+            optimiser = self._optimiser(
+                learning_rate=schedule,
+                weight_decay=self.stage.learning_rate_weight_decay_rate,
+            )
+            loss = self._loss
+            self.compile(
+                optimizer=optimiser,
+                loss=loss,
+                run_eagerly=self.stage.debug,
+            )
+            self(
+                (self.stage.train_data.phase, self.stage.train_data.amplitude),
+                training=False,
+                mask=self.stage.train_data.mask,
+            )
+
+            self.log.debug("Trainable variables:")
+            for var in self.trainable_variables:
+                self.log.debug(f"{var.name}: {var.shape}")
+            self.summary(print_fn=self.log.debug)  # Will show number of parameters
+            self.built = True
+
+    def save_checkpoint(self, savepath: "Path") -> None:
         # Normalise mean of physical latents to 0 across all batches
         if self.n_physical > 0:
             phase = tf.convert_to_tensor(self.stage.train_data.phase)
@@ -774,29 +955,38 @@ class TFPAEModel(ks.Model):
             if TYPE_CHECKING:
                 encoded = cast("FTensor[S['n_sn nspec_dim n_latents']]", encoded)
 
-            latents_sum = tf.reduce_sum(tf.reduce_sum(encoded, axis=0), axis=0)
-            latents_num = tf.reduce_sum(
-                tf.reduce_sum(tf.ones_like(encoded), axis=0), axis=0
-            )
+            latents_sum = tf.reduce_sum(encoded, axis=(0, 1))
+            latents_num = tf.reduce_sum(tf.ones_like(encoded), axis=(0, 1))
             moving_means = latents_sum / latents_num
             if TYPE_CHECKING:
                 latents_sum = cast("FTensor[S['n_latents']]", latents_sum)
                 latents_num = cast("FTensor[S['n_latents']]", latents_num)
                 moving_means = cast("FTensor[S['n_latents']]", moving_means)
             self.encoder.moving_means = moving_means
-        if self.stage.savepath is not None:
-            self.save_weights(self.stage.savepath / self.weights_path)
-            self.save(self.stage.savepath / self.model_path)
+        self.save_weights(savepath / self.weights_path)
+        self.save(savepath / self.model_path)
 
-    def load_checkpoint(self, loadpath: "Path") -> None:
-        init_weights = self.encoder.encode_output_layer.get_weights()[0]
-        self.load_weights(loadpath / self.weights_path)
-        weights = self.encoder.encode_output_layer.get_weights()[0]
-
-        # Set the weights of the newly introduced latent parameter to effectively 0
-        #   Since the initial weights are random values which we then divide by 100
-        weights[:, self.stage.stage - 1] = init_weights[:, self.stage.stage - 1] / 100
-        self.encoder.encode_output_layer.set_weights([weights])
+    def load_checkpoint(
+        self, loadpath: "Path", *, reset_weights: bool | None = None
+    ) -> None:
+        self.build_model()
+        reset_weights = (
+            (self.stage.stage < self.n_latents)
+            if reset_weights is None
+            else reset_weights
+        )
+        if reset_weights:
+            init_weights = self.encoder.encode_output_layer.get_weights()[0]
+            self.load_weights(loadpath / self.weights_path)
+            weights = self.encoder.encode_output_layer.get_weights()[0]
+            # Set the weights of the newly introduced latent parameter to effectively 0
+            #   Since the initial weights are random values which we then divide by 100
+            weights[:, self.stage.stage - 1] = (
+                init_weights[:, self.stage.stage - 1] / 100
+            )
+            self.encoder.encode_output_layer.set_weights([weights])
+        else:
+            self.load_weights(loadpath / self.weights_path)
 
     def prep_data(self, data: "RawData") -> "PrepData":
         (_phase, _d_phase, _amplitude, _d_amplitude, mask) = data
@@ -1018,7 +1208,7 @@ class TFPAEModel(ks.Model):
             )
             if TYPE_CHECKING:
                 shuffled_inds = cast(
-                    "IRTensor[Literal['batch_dim n_spec_to_shuffle(sn)']]",
+                    "IRTensor[S['batch_dim n_spec_to_shuffle(sn)']]",
                     shuffled_inds,
                 )
 

@@ -29,6 +29,7 @@ class PAEModelConfig(StepConfig):
 
     # === Required ===
     backend: "Backend"
+    debug: bool = False
 
     @model_validator(mode="after")
     def validate_bounds(self) -> Self:
@@ -110,6 +111,17 @@ class PAEModelConfig(StepConfig):
     phase_offset_scale: Literal[0, -1] | PositiveFloat = 0
     amplitude_offset_scale: NonNegativeFloat = 0
     mask_fraction: Annotated[float, Field(ge=0, le=1)] = 0
+
+    # --- Loss ---
+    loss_residual_penalty: NonNegativeFloat = 0
+
+    loss_delta_av_penalty: NonNegativeFloat = 0
+    loss_delta_m_penalty: NonNegativeFloat = 0
+    loss_delta_p_penalty: NonNegativeFloat = 0
+
+    loss_covariance_penalty: NonNegativeFloat = 0
+    loss_decorrelate_all: bool = False
+    loss_decorrelate_dust: bool = False
 
     # --- Stages ---
     # ΔAᵥ
