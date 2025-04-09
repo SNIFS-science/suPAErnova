@@ -19,6 +19,7 @@
         kernel_regulariser_penalty = 0.01
         loss                       = "MeanAbsoluteError"
         n_z_latents                = 3
+        name                       = "Default"
         optimiser                  = "AdamW"
         physical_latents           = true
         scheduler                  = "ExponentialDecay"
@@ -27,4 +28,9 @@
 
 [nflow]
     [nflow.model]
-        backend = "tf"
+        backend          = "tf"
+        debug            = false
+        n_hidden_units   = 8
+        n_layers         = 12
+        name             = "Default"
+        physical_latents = true

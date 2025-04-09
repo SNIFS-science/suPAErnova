@@ -6,16 +6,38 @@ from typing import (
     override,
 )
 
+import keras
 import tensorflow as tf
 from tensorflow import keras as ks
+import tensorflow_probability as tfp
+from tensorflow_probability import (
+    bijectors as tfb,
+    distributions as tfd,
+)
 
 if TYPE_CHECKING:
     from logging import Logger
+    from pathlib import Path
+    from collections.abc import Callable
 
+    from suPAErnova.steps.pae.tf import S, FTensor, TFPAEModel, TensorCompatible
+    from suPAErnova.steps.data.data import DataStep
     from suPAErnova.steps.nflow.model import NFlowModel
-    from suPAErnova.configs.steps.pae.tf.tf import TFPAEModelConfig
+    from suPAErnova.configs.steps.nflow.tf import TFNFlowModelConfig
+
+    # === Custom Types
+    NFlowInputs = FTensor[S["batch_dim n_latents"]]
+    NFlowOutputs = FTensor[S["batch_dim"]]
 
 
+@keras.saving.register_keras_serializable("SuPAErnova")
+class TFNFlowLoss(ks.losses.Loss):
+    @override
+    def call(self, y_true: "tf.Tensor", y_pred: "tf.Tensor") -> "tf.Tensor":
+        return -y_pred
+
+
+@keras.saving.register_keras_serializable("SuPAErnova")
 class TFNFlowModel(ks.Model):
     def __init__(
         self,
@@ -23,9 +45,191 @@ class TFNFlowModel(ks.Model):
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
-        super().__init__(*args, name=f"{config.name.split()[-1]}PAEModel", **kwargs)
+        super().__init__(*args, name=f"{config.name.split()[-1]}NFlowModel", **kwargs)
         # --- Config ---
-        options = cast("TFPAEModelConfig", config.options)
+        options = cast("TFNFlowModelConfig", config.options)
         self.log: Logger = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
+        self.debug: bool = options.debug
+        self.pae: TFPAEModel = config.pae.model
+
+        # --- Training ---
+        self.built: bool = False
+        self.batch_size: int = options.batch_size
+        self.save_best: bool = options.save_best
+        self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
+        self.model_path: str = f"{'best' if self.save_best else 'latest'}.model.keras"
+
+        self.activation: Callable[[tf.Tensor], tf.Tensor] = options.activation_fn
+        self._optimiser: type[ks.optimizers.Optimizer] = options.optimiser_cls
+        self._loss: ks.losses.Loss = (
+            options.loss_cls() if options.loss_cls is not None else TFNFlowLoss()
+        )
+
+        self.n_hidden_units: int = options.n_hidden_units
+        self.n_layers: int = options.n_layers
+        self.batch_normalisation: bool = options.batch_normalisation
+        self.physical_latents: bool = options.physical_latents
+
+        self.learning_rate: float = options.learning_rate
+        self.epochs: int = options.epochs
+        self._epoch: int = 0
+
+        self.data: "NFlowInputs"
+
+        # --- Latent Dimensions ---
+        self.n_latents: int = self.pae.n_zs
+        if self.physical_latents:
+            self.n_latents += 1
+
+        # --- Layers ---
+        self.gaussian: tfd.MultivariateNormalDiag
+        self.bijectors: tfb.Chain
+        self.pdf: tfd.TransformedDistribution
+        self.gaussian = tfd.MultivariateNormalDiag(
+            loc=tf.zeros(self.n_latents),
+            scale_diag=tf.ones(self.n_latents),
+        )
+
+        permutations = [
+            tf.roll(tf.range(self.n_latents), shift=i, axis=0)
+            for i in range(self.n_layers)
+        ]
+
+        bijectors = []
+
+        for permutation in permutations:
+            # First permute input dimensions
+            bijectors.append(tfb.Permute(permutation=permutation))
+
+            # Then (optionally) apply batch normalisation
+            if self.batch_normalisation:
+                bijectors.append(tfb.BatchNormalization(training=True))
+
+            # Finally, pass to a Masked Autoregressive Flow
+            bijectors.append(
+                tfb.MaskedAutoregressiveFlow(
+                    shift_and_log_scale_fn=tfb.AutoregressiveNetwork(
+                        params=2,
+                        hidden_units=[self.n_hidden_units, self.n_hidden_units],
+                        activation=self.activation,
+                        use_bias=True,
+                    ),
+                )
+            )
+
+        # Optionally apply one last batch normalisation layer
+        if self.batch_normalisation:
+            bijectors.append(tfb.BatchNormalization(training=True))
+
+        self.bijectors = tfb.Chain(bijectors)
+
+        self.pdf = tfp.distributions.TransformedDistribution(
+            distribution=self.gaussian, bijector=self.bijectors
+        )
+
+    @override
+    def call(
+        self,
+        inputs: "NFlowInputs",
+        training: bool | None = None,
+        mask: "TensorCompatible | None" = None,
+    ) -> "NFlowOutputs":
+        training = False if training is None else training
+
+        log_prob = self.pdf.log_prob(inputs, training=training)
+        if TYPE_CHECKING:
+            log_prob = cast("FTensor[S['batch_dim']]", log_prob)
+
+        return log_prob
+
+    def train_model(
+        self,
+        *,
+        savepath: "Path | None" = None,
+    ) -> ks.callbacks.History:
+        # === Setup Callbacks ===
+        callbacks: list[ks.callbacks.Callback] = []
+
+        if savepath is not None:
+            # --- Backup & Restore ---
+            # Backup checkpoints each epoch and restore if training got cancelled midway through
+            if not self.force:
+                backup_dir = savepath / "backups"
+                backup_callback = ks.callbacks.BackupAndRestore(str(backup_dir))
+                callbacks.append(backup_callback)
+
+            # --- Model Checkpoint ---
+            checkpoint_callback = ks.callbacks.ModelCheckpoint(
+                str(savepath / self.weights_path),
+                save_best_only=self.save_best,
+                save_weights_only=True,
+                # verbose=0,
+            )
+            callbacks.append(checkpoint_callback)
+
+        # --- Terminate on NaN ---
+        # Terminate training when a NaN loss is encountered
+        callbacks.append(ks.callbacks.TerminateOnNaN())
+
+        self.build_model()
+
+        # === Train ===
+        self._epoch = 0
+        return self.fit(
+            x=self.data,
+            y=tf.zeros_like(self.data),
+            initial_epoch=self._epoch,
+            epochs=self.epochs,
+            batch_size=self.batch_size,
+            shuffle=True,
+            callbacks=callbacks,
+            # verbose=0,
+        )
+
+    def build_model(
+        self,
+    ) -> None:
+        if not self.built:
+            # === Prep Data ===
+            train_phase = self.pae.stage.train_data.phase
+            train_amplitude = self.pae.stage.train_data.amplitude
+            train_mask = self.pae.stage.train_data.mask
+            latents = self.pae.encoder(
+                (train_phase, train_amplitude), training=False, mask=train_mask
+            )
+
+            if self.physical_latents:
+                data = latents[:, :, : self.pae.n_zs + 1]
+            elif self.pae.n_physical > 0:
+                data = latents[:, :, 1 : self.pae.n_zs + 1]
+            else:
+                data = latents
+            self.data = data
+
+            optimiser = self._optimiser(
+                learning_rate=self.learning_rate,
+            )
+            loss = self._loss
+            self.compile(
+                optimizer=optimiser,
+                loss=loss,
+                run_eagerly=self.debug,
+            )
+            self((self.data), training=False)
+
+            self.log.debug("Trainable variables:")
+            for var in self.trainable_variables:
+                self.log.debug(f"{var.name}: {var.shape}")
+            self.summary(print_fn=self.log.debug)  # Will show number of parameters
+
+            self.built = True
+
+    def save_checkpoint(self, savepath: "Path") -> None:
+        self.save_weights(savepath / self.weights_path)
+        self.save(savepath / self.model_path)
+
+    def load_checkpoint(self, loadpath: "Path") -> None:
+        self.build_model()
+        self.load_weights(loadpath / self.weights_path)

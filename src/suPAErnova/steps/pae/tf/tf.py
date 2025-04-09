@@ -553,6 +553,7 @@ class TFPAEModel(ks.Model):
         self.decoder.wl_dim = config.wl_dim
 
         # --- Training ---
+        self.built: bool = False
         self.batch_size: int = options.batch_size
         self.save_best: bool = options.save_best
         self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
@@ -569,7 +570,6 @@ class TFPAEModel(ks.Model):
         self._optimiser: type[ks.optimizers.Optimizer] = options.optimiser_cls
         self._loss: ks.losses.Loss = options.loss_cls()
 
-        self.built: bool = False
         self.stage: Stage
         self.latents_z_mask: ITensor[S["n_latents"]]
         self.latents_physical_mask: ITensor[S["n_latents"]]

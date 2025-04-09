@@ -124,22 +124,22 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
 
     @override
     def _load(self) -> None:
-        for _i, pae_model in enumerate(self.pae_models):
+        for pae_model in self.pae_models:
             pae_model.load()
 
     @override
     def _run(self) -> None:
-        for _i, pae_model in enumerate(self.pae_models):
+        for pae_model in self.pae_models:
             pae_model.run()
 
     @override
     def _result(self) -> None:
-        for _i, pae_model in enumerate(self.pae_models):
+        for pae_model in self.pae_models:
             pae_model.result()
 
     @override
     def _analyse(self) -> None:
-        for _i, pae_model in enumerate(self.pae_models):
+        for pae_model in self.pae_models:
             pae_model.analyse()
 
 

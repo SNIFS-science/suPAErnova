@@ -289,7 +289,15 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
 
     @override
     def _result(self) -> None:
-        pass
+        model_cls = get_args(self.__orig_class__)[0]
+        self.model = model_cls(self)
+
+        final_stage = self.run_stages[-1]
+        self.model.stage = final_stage
+        final_savepath = self.paths.out / self.model.name / final_stage.fname
+
+        self.log.debug(f"Saving final PAE model weights to {final_savepath}")
+        self.model.save_checkpoint(final_savepath)
 
     @override
     def _analyse(self) -> None:

@@ -68,7 +68,7 @@ class PAEModelConfig(StepConfig):
         return self
 
     physical_latents: bool
-    n_z_latents: NonNegativeInt
+    n_z_latents: PositiveInt
 
     @model_validator(mode="after")
     def validate_n_latents(self) -> Self:

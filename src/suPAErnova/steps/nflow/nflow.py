@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, get_args, override
 
 from suPAErnova.steps import SNPAEStep
 from suPAErnova.steps.pae.tf import TFPAEModel
@@ -20,14 +20,14 @@ if TYPE_CHECKING:
 
 ModelConfig = TFNFlowModelConfig | TCHNFlowModelConfig
 Model = TFNFlowModel | TCHNFlowModel
-PAE = PAEModel[TFPAEModel] | PAEModel[TCHPAEModel]
+PAE = TFPAEModel | TCHPAEModel
 ModelMap: "dict[type[ModelConfig], type[Model]]" = {
     TFNFlowModelConfig: TFNFlowModel,
     TCHNFlowModelConfig: TCHNFlowModel,
 }
 CompatabilityMap: "dict[type[ModelConfig], type[PAE]]" = {
-    TFNFlowModelConfig: PAEModel[TFPAEModel],
-    TCHNFlowModelConfig: PAEModel[TCHPAEModel],
+    TFNFlowModelConfig: TFPAEModel,
+    TCHNFlowModelConfig: TCHPAEModel,
 }
 
 
@@ -49,7 +49,7 @@ class NFlowStep(SNPAEStep[NFlowStepConfig]):
         self.pae: PAEStep
 
         # --- Setup Variables ---
-        self.nflow_models: list[NFlowModel[Model]]
+        self.nflow_models: list[NFlowModel[Model]] = []
 
     @override
     def _setup(self, *, pae: "PAEStep") -> None:
@@ -57,20 +57,45 @@ class NFlowStep(SNPAEStep[NFlowStepConfig]):
         self.pae = pae
 
         # --- Models ---
-        self.nflow_models = [
-            NFlowModel[ModelMap[model.__class__]](model)
-            for model in self.options.models
-        ]
-
-        for i, nflow_model in enumerate(self.nflow_models):
+        for model in self.options.models:
             compat_pae_models = [
                 pae_model
                 for pae_model in self.pae.pae_models
-                if pae_model.__class__
-                == CompatabilityMap[self.options.models[i].__class__]
+                if get_args(pae_model.__orig_class__)[0]
+                == CompatabilityMap[model.__class__]
             ]
-            print(compat_pae_models)
-            nflow_model.setup(data=self.pae.data, pae=self.pae.pae_models[i])
+            if len(compat_pae_models) == 0:
+                err = f"{self.name} has no compatable PAE models with backend: {CompatabilityMap[model.__class__]}"
+                raise ValueError(err)
+
+            for pae_model in compat_pae_models:
+                nflow_model = NFlowModel[ModelMap[model.__class__]](model)
+                nflow_model.setup(pae=pae_model)
+                self.nflow_models.append(nflow_model)
+
+    @override
+    def _completed(self) -> bool:
+        return all(nflow_model.completed() for nflow_model in self.nflow_models)
+
+    @override
+    def _load(self) -> None:
+        for nflow_model in self.nflow_models:
+            nflow_model.load()
+
+    @override
+    def _run(self) -> None:
+        for nflow_model in self.nflow_models:
+            nflow_model.run()
+
+    @override
+    def _result(self) -> None:
+        for nflow_model in self.nflow_models:
+            nflow_model.result()
+
+    @override
+    def _analyse(self) -> None:
+        for nflow_model in self.nflow_models:
+            nflow_model.analyse()
 
 
 NFlowStep.register_step()
