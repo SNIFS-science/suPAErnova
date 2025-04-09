@@ -8,8 +8,8 @@ from collections.abc import Callable
 import toml
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from suPAErnova.logging import setup_logging
 from suPAErnova.configs.paths import PathConfig
+from suPAErnova.snpae_logging import setup_logging
 from suPAErnova.configs.globals import GlobalConfig
 
 

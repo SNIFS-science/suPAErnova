@@ -49,6 +49,7 @@ class NFlowModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.debug = self.options.debug
         self.data = data
         self.pae = pae
+        print(self)
 
     @override
     def _completed(self) -> bool:

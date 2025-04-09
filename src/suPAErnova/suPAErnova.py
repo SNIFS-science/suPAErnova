@@ -13,10 +13,10 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 from suPAErnova.steps import SNPAEStep
 from suPAErnova.configs import SNPAEConfig
-from suPAErnova.logging import setup_logging
 from suPAErnova.configs.input import InputConfig
 from suPAErnova.configs.paths import PathConfig
 from suPAErnova.configs.steps import StepConfig
+from suPAErnova.snpae_logging import setup_logging
 from suPAErnova.configs.globals import GlobalConfig
 
 if TYPE_CHECKING:
