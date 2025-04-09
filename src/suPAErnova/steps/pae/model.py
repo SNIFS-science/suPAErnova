@@ -258,6 +258,7 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self.model = model_cls(self)
 
         final_stage = self.run_stages[-1]
+        self.model.stage = final_stage
         final_savepath = self.paths.out / self.model.name / final_stage.fname
 
         self.log.debug(f"Loading final PAE model weights from {final_savepath}")

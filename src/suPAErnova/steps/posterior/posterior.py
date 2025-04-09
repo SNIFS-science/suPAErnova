@@ -7,7 +7,7 @@ from suPAErnova.configs.steps.posterior import PosteriorStepConfig
 @final
 class PosteriorStep(SNPAEStep[PosteriorStepConfig]):
     # Class Variables
-    id: ClassVar["str"] = "nflow"
+    id: ClassVar["str"] = "posterior"
 
 
 PosteriorStep.register_step()

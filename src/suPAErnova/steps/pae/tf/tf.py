@@ -1,7 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 from typing import (
     TYPE_CHECKING,
-    Self,
     cast,
     override,
 )
@@ -478,11 +477,14 @@ class TFPAEDecoder(ks.layers.Layer):
             zs_latent = input_latents[:, :, 1 : self.n_zs + 1]
             delta_m_latent = input_latents[:, :, self.n_zs + 1 : self.n_zs + 2]
             delta_p_latent = input_latents[:, :, self.n_zs + 2 : self.n_zs + 3]
+
+            # Apply Δ𝓅 shift
+            input_phase += delta_p_latent
         else:
-            delta_av_latent = tf.expand_dims(tf.zeros_like(input_phase), axis=-1)
-            zs_latent = input_latents[:, :, 0:]
-            delta_m_latent = tf.expand_dims(tf.zeros_like(input_phase), axis=-1)
-            delta_p_latent = tf.expand_dims(tf.zeros_like(input_phase), axis=-1)
+            zs_latent = input_latents
+            delta_av_latent = delta_m_latent = delta_p_latent = tf.zeros_like(
+                zs_latent[:, :, 0]
+            )  # Define here even though they never get used, as it allows for better XLA compilation
         if TYPE_CHECKING:
             delta_av_latent = cast(
                 "FTensor[S['batch_dim nspec_dim 1']]", delta_av_latent
@@ -490,9 +492,6 @@ class TFPAEDecoder(ks.layers.Layer):
             zs_latent = cast("FTensor[S['batch_dim nspec_dim n_zs']]", zs_latent)
             delta_m_latent = cast("FTensor[S['batch_dim nspec_dim 1']]", delta_m_latent)
             delta_p_latent = cast("FTensor[S['batch_dim nspec_dim 1']]", delta_p_latent)
-
-        # Apply Δ𝓅 shift
-        input_phase += delta_p_latent
 
         # Create initial input layer
         x: FTensor[S["batch_dim nspec_dim n_zs+phase_dim"]] = ks.layers.concatenate([
@@ -511,12 +510,12 @@ class TFPAEDecoder(ks.layers.Layer):
         # Decode from intermediate dimensions to output dimension
         amplitude = self.decode_output_layer(x)
 
-        # Calculate Colourlaw
-        colourlaw = self.colourlaw_layer(delta_av_latent)
-
         # Apply ΔAᵥ / Δℳ  shift
         if self.n_physical > 0:
-            amplitude *= tf.pow(10.0, -0.4 * colourlaw * delta_m_latent)
+            # Calculate Colourlaw
+            colourlaw = self.colourlaw_layer(delta_av_latent)
+
+            amplitude *= tf.pow(10.0, -0.4 * (colourlaw + delta_m_latent))
 
         # Apply RELU activation function
         if not training:
@@ -577,7 +576,7 @@ class TFPAEModel(ks.Model):
         self._epoch: int = 0
 
         # --- Loss ---
-        self._loss_terms: FTensor[S["4"]]
+        self._loss_terms: dict[str, FTensor[S[""]]]
         self.loss_residual_penalty: float = options.loss_residual_penalty
 
         self.loss_delta_av_penalty: float = options.loss_delta_av_penalty
@@ -595,9 +594,11 @@ class TFPAEModel(ks.Model):
 
         # --- Metrics ---
         self.loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss")
-        self.recon_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="recon_loss")
-        self.model_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="model_loss")
-        self.cov_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="cov_loss")
+        self.pred_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss_pred")
+        self.model_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss_model")
+        self.resid_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss_resid")
+        self.delta_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss_delta")
+        self.cov_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss_cov")
 
     @property
     @override
@@ -609,9 +610,13 @@ class TFPAEModel(ks.Model):
         # `reset_states()` yourself at the time of your choosing.
         metrics = [
             self.loss_tracker,
-            self.recon_loss_tracker,
+            self.pred_loss_tracker,
             self.model_loss_tracker,
         ]
+        if self.loss_residual_penalty > 0:
+            metrics.append(self.resid_loss_tracker)
+        if self.n_physical > 0 and self.loss_physical_penalty > 0:
+            metrics.append(self.delta_loss_tracker)
         if self.loss_covariance_penalty > 0:
             metrics.append(self.cov_loss_tracker)
         return metrics
@@ -668,30 +673,25 @@ class TFPAEModel(ks.Model):
             input_mask = cast("ITensor[S['batch_dim nspec_dim wl_dim']]", input_mask)
             latents_mask = cast("FTensor[S['batch_dim 1']]", latents_mask)
 
-        loss = self._loss(y_true=input_amp, y_pred=output_amp)
-        if TYPE_CHECKING:
-            loss = cast("FTensor[S['']]", loss)
-
-        original_loss = loss
+        pred_loss = self._loss(y_true=input_amp, y_pred=output_amp)
         model_loss = tf.reduce_sum(self.losses)
-        cov_loss = tf.constant(0.0)
-
-        loss += model_loss
+        if TYPE_CHECKING:
+            pred_loss = cast("FTensor[S['']]", pred_loss)
+            model_loss = cast("FTensor[S['']]", model_loss)
+        loss_terms = {
+            self.pred_loss_tracker.name: pred_loss,
+            self.model_loss_tracker.name: model_loss,
+        }
 
         # --- Penalties ---
         # Penalise larger residuals between the input amplitude and the output amplitude
         if self.loss_residual_penalty > 0:
-            residual_penalty: "FTensor[S['batch_dim']]" = (
-                self.loss_residual_penalty
-                * tf.reduce_sum(
-                    tf.abs(
-                        tf.reduce_mean(
-                            input_mask * (input_amp - output_amp), axis=(-1, -2)
-                        )
-                    )
+            residual_penalty = self.loss_residual_penalty * tf.reduce_mean(
+                tf.abs(
+                    tf.reduce_sum(input_mask * (input_amp - output_amp), axis=(-2, -1))
                 )
             )
-            loss += residual_penalty
+            loss_terms[self.resid_loss_tracker.name] = residual_penalty
 
         # Penalise phyical latents which are far from unity (one for multiplicative, zero for additive)
         if self.n_physical > 0 and self.loss_physical_penalty > 0:
@@ -733,12 +733,12 @@ class TFPAEModel(ks.Model):
                 * latents_penalty_scale
                 * physical_latents_offset
             )
-            loss += physical_latents_penalty
+            loss_terms[self.delta_loss_tracker.name] = physical_latents_penalty
 
         if self.loss_covariance_penalty > 0:
             eps = tf.constant(1e-10)
             masked_latents = latents[:, 0, :] * latents_mask
-            num_masked_latents = tf.reduce_sum(latents_mask)
+            num_masked_latents = tf.reduce_sum(latents_mask) + eps
             latents_mean = (
                 tf.reduce_sum(masked_latents, axis=0, keepdims=True)
                 / num_masked_latents
@@ -755,8 +755,7 @@ class TFPAEModel(ks.Model):
                         tf.expand_dims(latents_var, -1), tf.expand_dims(latents_var, 0)
                     )
                 )
-                + eps
-            )
+            ) + eps
             latents_cov_norm = latents_cov / std_outer
 
             latent_dim = tf.shape(latents_cov_norm)[0]
@@ -779,17 +778,17 @@ class TFPAEModel(ks.Model):
                 cov_mask += tf.transpose(cov_mask)
                 cov_mask = tf.clip_by_value(cov_mask, 0.0, 1.0)
 
-            loss_cov = tf.reduce_sum(
-                tf.square(latents_cov_norm * cov_mask)
-            ) / tf.reduce_sum(cov_mask)
-            loss_covariance_penalty = self.loss_covariance_penalty * loss_cov
-            cov_loss = loss_covariance_penalty
-            loss += loss_covariance_penalty
+            loss_cov = tf.reduce_sum(tf.square(latents_cov_norm * cov_mask)) / (
+                tf.reduce_sum(cov_mask) + eps
+            )
 
-        loss_terms = [loss, original_loss, model_loss]
-        if self.loss_covariance_penalty > 0:
-            loss_terms.append(cov_loss)
-        self._loss_terms = tf.stack(loss_terms)
+            loss_covariance_penalty = self.loss_covariance_penalty * loss_cov
+            loss_terms[self.cov_loss_tracker.name] = loss_covariance_penalty
+
+        loss = tf.add_n(loss_terms.values())
+        loss_terms[self.loss_tracker.name] = loss
+
+        self._loss_terms = loss_terms
         return loss
 
     @override
@@ -834,9 +833,9 @@ class TFPAEModel(ks.Model):
         )
 
         # Update metrics (includes the metric that tracks the loss)
-        for i, metric in enumerate(self.metrics):
+        for metric in self.metrics:
             if "loss" in metric.name:
-                metric.update_state(self._loss_terms[i])
+                metric.update_state(self._loss_terms[metric.name])
             else:
                 metric.update_state(amplitude, pred_amplitude)
 

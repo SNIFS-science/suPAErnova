@@ -11,7 +11,7 @@ from suPAErnova.configs.steps import StepConfig
 from suPAErnova.configs.steps.data import DataStepConfig
 from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
 from suPAErnova.configs.steps.pae.tch import TCHPAEModelConfig
-from suPAErnova.configs.steps.pae.model import TFBackend
+from suPAErnova.configs.steps.pae.model import TFBackend, TCHBackend
 
 ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
 
@@ -33,6 +33,10 @@ class PAEStepConfig(StepConfig):
     @classmethod
     def prep_model_config(cls, data: "Any") -> "Any":
         if isinstance(data, dict):
+            if "model" not in data:
+                err = f"No Base Model has been defined. Please define one in [{cls.id}.model]"
+                raise ValueError(err)
+
             default_model_config = {
                 "paths": data.get("paths"),
                 "config": data.get("config"),
@@ -41,17 +45,29 @@ class PAEStepConfig(StepConfig):
             base_model_config = {**default_model_config, **data.get("model", {})}
             data["model"] = base_model_config
 
-            pae_model_configs = [data["model"]] + [
-                {**base_model_config, **model_config}
-                for model_config in data.get("variant", [])
+            pae_model_configs = [
+                data["model"],
+                *[
+                    {**base_model_config, **model_config}
+                    for model_config in data.get("variant", [])
+                ],
             ]
-            data.pop("variant")
-            data["variant"] = [
-                TFPAEModelConfig.from_config(pae_model_config)
-                if pae_model_config["backend"] in get_args(TFBackend)
-                else TCHPAEModelConfig.from_config(pae_model_config)
-                for pae_model_config in pae_model_configs
-            ]
+            data.pop("variant", None)
+            data["variant"] = []
+            for i, pae_model_config in enumerate(pae_model_configs):
+                backend = pae_model_config.get("backend")
+                if backend is None:
+                    err = f"{'Base' if i == 0 else f'Variant {i}'} Model is missing a backend key. Please choose from {get_args(TFBackend)} for TensorFlow or {get_args(TCHBackend)} for PyTorch"
+                    raise ValueError(err)
+                if backend in get_args(TFBackend):
+                    model_config_cls = TFPAEModelConfig
+                elif pae_model_config.get("backend") in get_args(TCHBackend):
+                    model_config_cls = TCHPAEModelConfig
+                else:
+                    err = f"Unknown backend: {backend}. Please choose from {get_args(TFBackend)} for TensorFlow or {get_args(TCHBackend)} for PyTorch"
+                    raise ValueError(err)
+                model_config = model_config_cls.from_config(pae_model_config)
+                data["variant"].append(model_config)
         return data
 
     # --- Optional ---

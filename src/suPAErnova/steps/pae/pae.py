@@ -21,9 +21,8 @@ if TYPE_CHECKING:
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
 
-    ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
-    Model = TFPAEModel | TCHPAEModel
-
+ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
+Model = TFPAEModel | TCHPAEModel
 ModelMap: "dict[type[ModelConfig], type[Model]]" = {
     TFPAEModelConfig: TFPAEModel,
     TCHPAEModelConfig: TCHPAEModel,
