@@ -6,7 +6,7 @@ from pydantic import Field, model_validator
 
 from suPAErnova.steps.nflow import NFlowStep
 from suPAErnova.configs.steps import StepConfig
-from suPAErnova.configs.steps.pae import PAEStepConfig
+from suPAErnova.configs.steps.nflow import NFlowStepConfig
 from suPAErnova.configs.steps.pae.model import TFBackend, TCHBackend
 
 from .tf import TFPosteriorModelConfig
@@ -18,7 +18,7 @@ ModelConfig = TFPosteriorModelConfig | TCHPosteriorModelConfig
 class PosteriorStepConfig(StepConfig):
     # --- Class Variables ---
     id: ClassVar[str] = "posterior"
-    required_steps: ClassVar[list[str]] = [PAEStepConfig.id]
+    required_steps: ClassVar[list[str]] = [NFlowStepConfig.id]
 
     # --- Previous Steps ---
     nflow: NFlowStep | None = None

@@ -37,4 +37,6 @@
 
 [posterior]
     [posterior.model]
-        backend="tch"
+        backend = "tf"
+        debug   = true
+        name    = "Default"

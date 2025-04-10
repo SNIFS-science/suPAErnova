@@ -46,7 +46,6 @@ class Stage(BaseModel):
     moving_means: list[float]
 
 
-@final
 class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
     id: ClassVar[str] = "pae_model"
 

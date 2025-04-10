@@ -56,7 +56,7 @@ if TYPE_CHECKING:
 
     # --- Decoder Tensors ---
     DecoderInputsShape = tuple[tuple[int, int, int], tuple[int, int, int]]
-    type DecoderInputs = tuple[
+    DecoderInputs = tuple[
         FTensor[S["batch_dim nspec_dim n_latents"]],
         FTensor[S["batch_dim nspec_dim phase_dim"]],
     ]
@@ -342,6 +342,17 @@ class TFPAEEncoder(ks.layers.Layer):
 
         return encoded
 
+    @override
+    def __call__(
+        self,
+        inputs: "EncoderInputs",
+        *,
+        training: bool | None = None,
+        mask: "TensorCompatible | None" = None,
+    ) -> "FTensor[S['batch_dim nspec_dim n_latents']]":
+        training = False if training is None else training
+        return super().__call__(inputs, training=training, mask=mask)
+
 
 @keras.saving.register_keras_serializable("SuPAErnova")
 class TFPAEDecoder(ks.layers.Layer):
@@ -529,6 +540,17 @@ class TFPAEDecoder(ks.layers.Layer):
             tf.reduce_max(input_mask, axis=-1, keepdims=True), tf.float32
         )
 
+    @override
+    def __call__(
+        self,
+        inputs: "DecoderInputs",
+        *,
+        training: bool | None = None,
+        mask: "TensorCompatible | None" = None,
+    ) -> "FTensor[S['batch_dim nspec_dim wl_dim']]":
+        training = False if training is None else training
+        return super().__call__(inputs, training=training, mask=mask)
+
 
 @keras.saving.register_keras_serializable("SuPAErnova")
 class TFPAEModel(ks.Model):
@@ -557,6 +579,7 @@ class TFPAEModel(ks.Model):
 
         # --- Training ---
         self.built: bool = False
+        self._epoch: int = 0
         self.batch_size: int = options.batch_size
         self.save_best: bool = options.save_best
         self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
@@ -567,6 +590,7 @@ class TFPAEModel(ks.Model):
         self.amplitude_offset_scale: float = options.amplitude_offset_scale
         self.mask_fraction: float = options.mask_fraction
 
+        # Training functions
         self._scheduler: type[ks.optimizers.schedules.LearningRateSchedule] = (
             options.scheduler_cls
         )
@@ -576,7 +600,6 @@ class TFPAEModel(ks.Model):
         self.stage: Stage
         self.latents_z_mask: "ITensor[S['n_latents']]"
         self.latents_physical_mask: "ITensor[S['n_latents']]"
-        self._epoch: int = 0
 
         # --- Loss ---
         self._loss_terms: dict[str, "FTensor[S['']]"]
@@ -643,6 +666,17 @@ class TFPAEModel(ks.Model):
             decoded = cast("FTensor[S['batch_dim nspec_dim wl_dim']]", decoded)
 
         return encoded, decoded
+
+    @override
+    def __call__(
+        self,
+        inputs: "EncoderInputs",
+        *,
+        training: bool | None = None,
+        mask: "TensorCompatible | None" = None,
+    ) -> "tuple[FTensor[S['batch_dim nspec_dim n_latents']], FTensor[S['batch_dim nspec_dim wl_dim']]]":
+        training = False if training is None else training
+        return super().__call__(inputs, training=training, mask=mask)
 
     @override
     def compute_loss(
@@ -837,10 +871,7 @@ class TFPAEModel(ks.Model):
 
         # Update metrics (includes the metric that tracks the loss)
         for metric in self.metrics:
-            if "loss" in metric.name:
-                metric.update_state(self._loss_terms[metric.name])
-            else:
-                metric.update_state(amplitude, pred_amplitude)
+            metric.update_state(self._loss_terms[metric.name])
 
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
@@ -936,7 +967,10 @@ class TFPAEModel(ks.Model):
                 run_eagerly=self.stage.debug,
             )
             self(
-                (self.stage.train_data.phase, self.stage.train_data.amplitude),
+                (
+                    tf.convert_to_tensor(self.stage.train_data.phase),
+                    tf.convert_to_tensor(self.stage.train_data.amplitude),
+                ),
                 training=False,
                 mask=self.stage.train_data.mask,
             )
@@ -1273,3 +1307,83 @@ class TFPAEModel(ks.Model):
             mask *= shuffled_amp_mask
 
         return (phase, d_phase, amplitude, d_amplitude, mask)
+
+    def recon_error(
+        self,
+        data: "ModelInputs",
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+        (phase, _d_phase, amp_true, d_amp, mask) = data
+        _, amp_pred = self((phase, amp_true), training=False, mask=mask)
+        wl_dim = tf.shape(mask)[-1]
+
+        outlier_cut = 100
+
+        time_bin_width = 0.1
+        time_min = 0.0
+        time_max = 1.0
+        num_time_bins = tf.cast((time_max - time_min) // time_bin_width + 2, tf.int32)
+
+        # Mask to keep only spectra with any valid data
+        has_valid_data = tf.reduce_max(mask, axis=-1) == 1
+
+        # Bin edges and centers
+        time_bin_edges = tf.linspace(
+            time_min - time_bin_width / 2,
+            time_max + time_bin_width / 2,
+            num_time_bins + 1,
+        )
+        time_bin_centers = 0.5 * (time_bin_edges[:-1] + time_bin_edges[1:])
+
+        # Filter and reshape
+        amp_true = tf.boolean_mask(amp_true, has_valid_data)
+        amp_pred = tf.boolean_mask(amp_pred, has_valid_data)
+        d_amp = tf.boolean_mask(d_amp, has_valid_data)
+        mask = tf.boolean_mask(mask, has_valid_data)
+        phase = tf.boolean_mask(phase, has_valid_data)
+        min_phase = tf.reduce_min(phase, keepdims=True)
+        max_phase = tf.reduce_min(phase, keepdims=True)
+        time = (phase - min_phase) / (max_phase - min_phase)
+
+        amp_true = tf.reshape(amp_true, [-1, wl_dim])
+        amp_pred = tf.reshape(amp_pred, [-1, wl_dim])
+        d_amp = tf.reshape(d_amp, [-1, wl_dim])
+        mask = tf.reshape(mask, [-1, wl_dim])
+
+        amp_true = tf.clip_by_value(amp_true, 1e-3, tf.float32.max)
+        amp_pred = tf.clip_by_value(amp_pred, 1e-3, tf.float32.max)
+
+        error = tf.abs((amp_true - amp_pred) / amp_pred)
+
+        # Digitize: get bin indices (digitize returns 1-based, so subtract 1)
+        bin_indices = tf.reshape(
+            (
+                tf.raw_ops.Bucketize(
+                    input=time, boundaries=time_bin_edges.numpy().tolist()
+                )
+                - 1
+            ),
+            [-1],
+        )  # no direct tf op, use raw with numpy for now
+        unique_bins = tf.unique(bin_indices).y
+
+        binned_error = tf.TensorArray(
+            tf.float32, size=0, dynamic_size=True, clear_after_read=False
+        )
+
+        for bin_id in tf.unstack(unique_bins):
+            in_bin_idx = tf.where(bin_indices == bin_id)[:, 0]
+            bin_error = tf.gather(error, in_bin_idx)
+            bin_mask = tf.gather(mask, in_bin_idx)
+
+            upper_clip = tfp.stats.percentile(bin_error, outlier_cut, axis=0)
+            clip_mask = tf.cast(bin_error > upper_clip, tf.int32)
+            bin_mask = tf.cast(bin_mask * (1 - clip_mask), tf.float32)
+
+            # Compute std of masked values
+            numerator = tf.reduce_sum((bin_error**2) * bin_mask, axis=0)
+            denominator = tf.reduce_sum(bin_mask, axis=0) + 1e-8
+            rms_error = tf.sqrt(numerator / denominator)
+            binned_error = binned_error.write(bin_id, rms_error)
+
+        binned_error = tf.transpose(binned_error.stack())
+        return binned_error, time_bin_edges, time_bin_centers

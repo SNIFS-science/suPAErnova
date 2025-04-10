@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from .nflow import Model
 
 
-@final
 class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
     id: ClassVar[str] = "nflow_model"
 

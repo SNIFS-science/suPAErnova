@@ -84,10 +84,7 @@ class TFNFlowModel(ks.Model):
             self.n_latents += 1
 
         # --- Layers ---
-        self.gaussian: tfd.MultivariateNormalDiag
-        self.bijectors: tfb.Chain
-        self.pdf: tfd.TransformedDistribution
-        self.gaussian = tfd.MultivariateNormalDiag(
+        self.gaussian: tfd.MultivariateNormalDiag = tfd.MultivariateNormalDiag(
             loc=tf.zeros(self.n_latents),
             scale_diag=tf.ones(self.n_latents),
         )
@@ -123,10 +120,12 @@ class TFNFlowModel(ks.Model):
         if self.batch_normalisation:
             bijectors.append(tfb.BatchNormalization(training=True))
 
-        self.bijectors = tfb.Chain(bijectors)
+        self.bijectors: tfb.Chain = tfb.Chain(bijectors)
 
-        self.pdf = tfp.distributions.TransformedDistribution(
-            distribution=self.gaussian, bijector=self.bijectors
+        self.pdf: tfd.TransformedDistribution = (
+            tfp.distributions.TransformedDistribution(
+                distribution=self.gaussian, bijector=self.bijectors
+            )
         )
 
     @override
@@ -188,25 +187,29 @@ class TFNFlowModel(ks.Model):
             # verbose=0,
         )
 
+    def get_data(
+        self, latents: "FTensor[S['batch_dim nspec_dim n_latents']]"
+    ) -> "FTensor[S['batch_dim nspec_dim n_latents']]":
+        if self.physical_latents:
+            data = latents[:, :, : self.pae.n_zs + 1]
+        elif self.pae.n_physical > 0:
+            data = latents[:, :, 1 : self.pae.n_zs + 1]
+        else:
+            data = latents
+        return data
+
     def build_model(
         self,
     ) -> None:
         if not self.built:
             # === Prep Data ===
-            train_phase = self.pae.stage.train_data.phase
-            train_amplitude = self.pae.stage.train_data.amplitude
+            train_phase = tf.convert_to_tensor(self.pae.stage.train_data.phase)
+            train_amplitude = tf.convert_to_tensor(self.pae.stage.train_data.amplitude)
             train_mask = self.pae.stage.train_data.mask
             latents = self.pae.encoder(
                 (train_phase, train_amplitude), training=False, mask=train_mask
             )
-
-            if self.physical_latents:
-                data = latents[:, :, : self.pae.n_zs + 1]
-            elif self.pae.n_physical > 0:
-                data = latents[:, :, 1 : self.pae.n_zs + 1]
-            else:
-                data = latents
-            self.data = data
+            self.data = self.get_data(latents)
 
             optimiser = self._optimiser(
                 learning_rate=self.learning_rate,
