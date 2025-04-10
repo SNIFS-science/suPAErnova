@@ -3,13 +3,13 @@ from typing import TYPE_CHECKING, ClassVar, get_args, override
 from suPAErnova.steps import SNPAEStep
 from suPAErnova.steps.pae.tf import TFPAEModel
 from suPAErnova.steps.pae.tch import TCHPAEModel
-from suPAErnova.steps.nflow.tf import TFNFlowModel
-from suPAErnova.steps.nflow.tch import TCHNFlowModel
-from suPAErnova.steps.pae.model import PAEModel
-from suPAErnova.steps.nflow.model import NFlowModel
 from suPAErnova.configs.steps.nflow import NFlowStepConfig
 from suPAErnova.configs.steps.nflow.tf import TFNFlowModelConfig
 from suPAErnova.configs.steps.nflow.tch import TCHNFlowModelConfig
+
+from .tf import TFNFlowModel
+from .tch import TCHNFlowModel
+from .model import NFlowModel
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -21,11 +21,11 @@ if TYPE_CHECKING:
 ModelConfig = TFNFlowModelConfig | TCHNFlowModelConfig
 Model = TFNFlowModel | TCHNFlowModel
 PAE = TFPAEModel | TCHPAEModel
-ModelMap: "dict[type[ModelConfig], type[Model]]" = {
+ModelMap: dict[type[ModelConfig], type[Model]] = {
     TFNFlowModelConfig: TFNFlowModel,
     TCHNFlowModelConfig: TCHNFlowModel,
 }
-CompatabilityMap: "dict[type[ModelConfig], type[PAE]]" = {
+CompatabilityMap: dict[type[ModelConfig], type[PAE]] = {
     TFNFlowModelConfig: TFPAEModel,
     TCHNFlowModelConfig: TCHPAEModel,
 }
@@ -33,9 +33,9 @@ CompatabilityMap: "dict[type[ModelConfig], type[PAE]]" = {
 
 class NFlowStep(SNPAEStep[NFlowStepConfig]):
     # Class Variables
-    id: ClassVar["str"] = "nflow"
+    id: ClassVar[str] = "nflow"
 
-    def __init__(self, config: "NFlowStepConfig") -> None:
+    def __init__(self, config: NFlowStepConfig) -> None:
         # --- Superclass Variables ---
         self.options: NFlowStepConfig
         self.config: GlobalConfig
@@ -49,7 +49,7 @@ class NFlowStep(SNPAEStep[NFlowStepConfig]):
         self.pae: PAEStep
 
         # --- Setup Variables ---
-        self.nflow_models: list[NFlowModel[Model]] = []
+        self.nflow_models: list[NFlowModel[Model, ModelConfig]] = []
 
     @override
     def _setup(self, *, pae: "PAEStep") -> None:
@@ -69,7 +69,9 @@ class NFlowStep(SNPAEStep[NFlowStepConfig]):
                 raise ValueError(err)
 
             for pae_model in compat_pae_models:
-                nflow_model = NFlowModel[ModelMap[model.__class__]](model)
+                nflow_model = NFlowModel[ModelMap[model.__class__], model.__class__](
+                    model
+                )
                 nflow_model.setup(pae=pae_model)
                 self.nflow_models.append(nflow_model)
 

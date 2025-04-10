@@ -5,12 +5,13 @@ import numpy as np
 
 from suPAErnova.steps import SNPAEStep
 from suPAErnova.steps.data import SNPAEData
-from suPAErnova.steps.pae.tf import TFPAEModel
-from suPAErnova.steps.pae.tch import TCHPAEModel
-from suPAErnova.steps.pae.model import PAEModel
 from suPAErnova.configs.steps.pae import PAEStepConfig
-from suPAErnova.configs.steps.pae.tf.tf import TFPAEModelConfig
-from suPAErnova.configs.steps.pae.tch.tch import TCHPAEModelConfig
+from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
+from suPAErnova.configs.steps.pae.tch import TCHPAEModelConfig
+
+from .tf import TFPAEModel
+from .tch import TCHPAEModel
+from .model import PAEModel
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 
 ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
 Model = TFPAEModel | TCHPAEModel
-ModelMap: "dict[type[ModelConfig], type[Model]]" = {
+ModelMap: dict[type[ModelConfig], type[Model]] = {
     TFPAEModelConfig: TFPAEModel,
     TCHPAEModelConfig: TCHPAEModel,
 }
@@ -31,9 +32,9 @@ ModelMap: "dict[type[ModelConfig], type[Model]]" = {
 
 class PAEStep(SNPAEStep[PAEStepConfig]):
     # Class Variables
-    id: ClassVar["str"] = "pae"
+    id: ClassVar[str] = "pae"
 
-    def __init__(self, config: "PAEStepConfig") -> None:
+    def __init__(self, config: PAEStepConfig) -> None:
         # --- Superclass Variables ---
         self.options: PAEStepConfig
         self.config: GlobalConfig
@@ -48,7 +49,7 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
         self.validation_frac: PositiveFloat
 
         # --- Setup Variables ---
-        self.pae_models: list[PAEModel[Model]]
+        self.pae_models: list[PAEModel[Model, ModelConfig]]
         self.train_data: list[SNPAEData]
         self.test_data: list[SNPAEData]
         self.val_data: list[SNPAEData]
@@ -66,7 +67,8 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
 
         # --- Models ---
         self.pae_models = [
-            PAEModel[ModelMap[model.__class__]](model) for model in self.options.models
+            PAEModel[ModelMap[model.__class__], model.__class__](model)
+            for model in self.options.models
         ]
         self.n_models = len(self.pae_models)
         self.n_kfolds = self.data.n_kfolds

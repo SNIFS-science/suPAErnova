@@ -23,8 +23,9 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from suPAErnova.steps.pae.model import Stage, PAEModel
     from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
+
+    from .model import Stage, PAEModel
 
     # === Custom Types ===
     S = Literal
@@ -133,18 +134,18 @@ class TFPAEEncoder(ks.layers.Layer):
         super().__init__(*args, name=f"{name.split()[-1]}Encoder", **kwargs)
 
         # --- Config Params ---
-        n_physical: Literal[0, 3] = 3 if options.physical_latents else 0
+        n_physical: "Literal[0, 3]" = 3 if options.physical_latents else 0
         n_zs: int = options.n_z_latents
         self.n_latents: int = n_physical + n_zs
-        self.latents_z_mask: ITensor[S["n_latents"]]
-        self.latents_physical_mask: ITensor[S["n_latents"]]
+        self.latents_z_mask: "ITensor[S['n_latents']]"
+        self.latents_physical_mask: "ITensor[S['n_latents']]"
 
         self.stage_num: int
-        self.moving_means: FTensor[S["n_latents"]]
+        self.moving_means: "FTensor[S['n_latents']]"
 
         self.encode_dims: list[int] = options.encode_dims
 
-        self.activation: Callable[[tf.Tensor], tf.Tensor] = options.activation_fn
+        self.activation: "Callable[[tf.Tensor], tf.Tensor]" = options.activation_fn
         self.regulariser: ks.regularizers.Regularizer = options.kernel_regulariser_cls(
             options.kernel_regulariser_penalty
         )
@@ -156,38 +157,38 @@ class TFPAEEncoder(ks.layers.Layer):
         self.encode_layers: list[
             TypedLayer[
                 ks.layers.Dense,
-                FTensor[S["batch_dim nspec_dim _"]],
-                FTensor[S["batch_dim nspec_dim encode_dim"]],
+                "FTensor[S['batch_dim nspec_dim _']]",
+                "FTensor[S['batch_dim nspec_dim encode_dim']]",
             ]
         ] = []
         self.dropout_layers: list[
             TypedLayer[
                 ks.layers.Dropout | ks.layers.Identity,
-                FTensor[S["batch_dim nspec_dim encode_dim"]],
-                FTensor[S["batch_dim nspec_dim encode_dim"]],
+                "FTensor[S['batch_dim nspec_dim encode_dim']]",
+                "FTensor[S['batch_dim nspec_dim encode_dim']]",
             ]
         ] = []
         self.batch_normalisation_layers: list[
             TypedLayer[
                 ks.layers.BatchNormalization | ks.layers.Identity,
-                FTensor[S["batch_dim nspec_dim encode_dim"]],
-                FTensor[S["batch_dim nspec_dim encode_dim"]],
+                "FTensor[S['batch_dim nspec_dim encode_dim']]",
+                "FTensor[S['batch_dim nspec_dim encode_dim']]",
             ]
         ] = []
         self.encode_nspec_layer: TypedLayer[
             ks.layers.Dense,
-            FTensor[S["batch_dim nspec_dim encode_dim"]],
-            FTensor[S["batch_dim nspec_dim nspec_dim"]],
+            "FTensor[S['batch_dim nspec_dim encode_dim']]",
+            "FTensor[S['batch_dim nspec_dim nspec_dim']]",
         ]
         self.encode_output_layer: TypedLayer[
             ks.layers.Dense,
-            FTensor[S["batch_dim nspec_dim nspec_dim"]],
-            FTensor[S["batch_dim nspec_dim n_latents"]],
+            "FTensor[S['batch_dim nspec_dim nspec_dim']]",
+            "FTensor[S['batch_dim nspec_dim n_latents']]",
         ]
         self.repeat_latent_layer: TypedLayer[
             ks.layers.RepeatVector,
-            FTensor[S["batch_dim n_latents"]],
-            FTensor[S["batch_dim nspec_dim n_latents"]],
+            "FTensor[S['batch_dim n_latents']]",
+            "FTensor[S['batch_dim nspec_dim n_latents']]",
         ]
 
     @override
@@ -262,7 +263,7 @@ class TFPAEEncoder(ks.layers.Layer):
         )
 
         # Create initial input layer
-        x: FTensor[S["batch_dim nspec_dim wl_dim+1"]] = ks.layers.concatenate([
+        x: "FTensor[S['batch_dim nspec_dim wl_dim+1']]" = ks.layers.concatenate([
             input_amp,
             input_phase,
         ])
@@ -344,16 +345,18 @@ class TFPAEEncoder(ks.layers.Layer):
 
 @keras.saving.register_keras_serializable("SuPAErnova")
 class TFPAEDecoder(ks.layers.Layer):
-    def __init__(self, options: "TFPAEModelConfig", name: str, **kwargs: "Any") -> None:
-        super().__init__(name=f"{name.split()[-1]}Decoder", **kwargs)
+    def __init__(
+        self, options: "TFPAEModelConfig", name: str, *args: "Any", **kwargs: "Any"
+    ) -> None:
+        super().__init__(*args, name=f"{name.split()[-1]}Decoder", **kwargs)
         # --- Config Params ---
-        self.n_physical: Literal[0, 3] = 3 if options.physical_latents else 0
+        self.n_physical: "Literal[0, 3]" = 3 if options.physical_latents else 0
         self.n_zs: int = options.n_z_latents
 
         self.wl_dim: int
         self.decode_dims: list[int] = options.decode_dims
 
-        self.activation: Callable[[tf.Tensor], tf.Tensor] = options.activation_fn
+        self.activation: "Callable[[tf.Tensor], tf.Tensor]" = options.activation_fn
         self.regulariser: ks.regularizers.Regularizer = options.kernel_regulariser_cls(
             options.kernel_regulariser_penalty
         )
@@ -362,37 +365,37 @@ class TFPAEDecoder(ks.layers.Layer):
         colourlaw = options.colourlaw
         if colourlaw is not None:
             _, colourlaw = np.loadtxt(colourlaw, unpack=True)
-        self.colourlaw: npt.NDArray[np.float64] | None = colourlaw
+        self.colourlaw: "npt.NDArray[np.float64] | None" = colourlaw
 
         # --- Layers ---
         self.decode_nspec_layer: TypedLayer[
             ks.layers.Dense,
-            FTensor[S["batch_dim nspec_dim _"]],
-            FTensor[S["batch_dim nspec_dim nspec_dim"]],
+            "FTensor[S['batch_dim nspec_dim _']]",
+            "FTensor[S['batch_dim nspec_dim nspec_dim']]",
         ]
         self.decode_layers: list[
             TypedLayer[
                 ks.layers.Dense,
-                FTensor[S["batch_dim nspec_dim _"]],
-                FTensor[S["batch_dim nspec_dim decode_dim"]],
+                "FTensor[S['batch_dim nspec_dim _']]",
+                "FTensor[S['batch_dim nspec_dim decode_dim']]",
             ]
         ]
         self.batch_normalisation_layers: list[
             TypedLayer[
                 ks.layers.BatchNormalization | ks.layers.Identity,
-                FTensor[S["batch_dim nspec_dim decode_dim"]],
-                FTensor[S["batch_dim nspec_dim decode_dim"]],
+                "FTensor[S['batch_dim nspec_dim decode_dim']]",
+                "FTensor[S['batch_dim nspec_dim decode_dim']]",
             ]
         ]
         self.decode_output_layer: TypedLayer[
             ks.layers.Dense,
-            FTensor[S["batch_dim nspec_dim decode_dim"]],
-            FTensor[S["batch_dim nspec_dim wl_dim"]],
+            "FTensor[S['batch_dim nspec_dim decode_dim']]",
+            "FTensor[S['batch_dim nspec_dim wl_dim']]",
         ]
         self.colourlaw_layer: TypedLayer[
             ks.layers.Dense | ks.layers.Identity,
-            FTensor[S["batch_dim nspec_dim 1"]],
-            FTensor[S["batch_dim nspec_dim wl_dim"]],
+            "FTensor[S['batch_dim nspec_dim 1']]",
+            "FTensor[S['batch_dim nspec_dim wl_dim']]",
         ]
 
     @override
@@ -531,19 +534,19 @@ class TFPAEDecoder(ks.layers.Layer):
 class TFPAEModel(ks.Model):
     def __init__(
         self,
-        config: "PAEModel[TFPAEModel]",
+        config: "PAEModel[TFPAEModel, TFPAEModelConfig]",
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
         super().__init__(*args, name=f"{config.name.split()[-1]}PAEModel", **kwargs)
         # --- Config ---
         options = cast("TFPAEModelConfig", config.options)
-        self.log: Logger = config.log
+        self.log: "Logger" = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
 
         # --- Latent Dimensions ---
-        self.n_physical: Literal[0, 3] = 3 if options.physical_latents else 0
+        self.n_physical: "Literal[0, 3]" = 3 if options.physical_latents else 0
         self.n_zs: int = options.n_z_latents
         self.n_latents: int = self.n_physical + self.n_zs
 
@@ -560,7 +563,7 @@ class TFPAEModel(ks.Model):
         self.model_path: str = f"{'best' if self.save_best else 'latest'}.model.keras"
 
         # Data Offsets
-        self.phase_offset_scale: Literal[0, -1] | float = options.phase_offset_scale
+        self.phase_offset_scale: "Literal[0, -1] | float" = options.phase_offset_scale
         self.amplitude_offset_scale: float = options.amplitude_offset_scale
         self.mask_fraction: float = options.mask_fraction
 
@@ -571,12 +574,12 @@ class TFPAEModel(ks.Model):
         self._loss: ks.losses.Loss = options.loss_cls()
 
         self.stage: Stage
-        self.latents_z_mask: ITensor[S["n_latents"]]
-        self.latents_physical_mask: ITensor[S["n_latents"]]
+        self.latents_z_mask: "ITensor[S['n_latents']]"
+        self.latents_physical_mask: "ITensor[S['n_latents']]"
         self._epoch: int = 0
 
         # --- Loss ---
-        self._loss_terms: dict[str, FTensor[S[""]]]
+        self._loss_terms: dict[str, "FTensor[S['']]"]
         self.loss_residual_penalty: float = options.loss_residual_penalty
 
         self.loss_delta_av_penalty: float = options.loss_delta_av_penalty
@@ -651,7 +654,7 @@ class TFPAEModel(ks.Model):
         training: bool | None = None,
         mask: "TensorCompatible | None" = None,
     ) -> "FTensor[S['']] | None":
-        if y is None or y_pred is None:
+        if x is None or y is None or y_pred is None:
             return None
         training = False if training is None else training
 

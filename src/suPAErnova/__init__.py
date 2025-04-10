@@ -1,1 +1,3 @@
-from suPAErnova.suPAErnova import *
+from .suPAErnova import main
+
+__all__ = ["main"]

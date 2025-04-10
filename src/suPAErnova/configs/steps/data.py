@@ -5,7 +5,6 @@ from typing import (
     Self,
     ClassVar,
     Annotated,
-    cast,
 )
 from pathlib import Path
 
@@ -17,26 +16,26 @@ from pydantic import (
     model_validator,
 )
 
-from suPAErnova.configs.steps import StepConfig
+from .steps import StepConfig
 
 
 class DataStepConfig(StepConfig):
     # --- Class Variables ---
-    id: ClassVar["str"] = "data"
+    id: ClassVar[str] = "data"
 
     # --- Required ---
-    data_dir: "Path"
-    meta: "Path"
-    idr: "Path"
-    mask: "Path"
+    data_dir: Path
+    meta: Path
+    idr: Path
+    mask: Path
 
     # --- Optional ---
     cosmological_model: str = "WMAP7"
-    salt_model: "str | Path" = "salt2"
+    salt_model: str | Path = "salt2"
     min_phase: float = -10
     max_phase: float = 40
     train_frac: Annotated[float, Field(ge=0, le=1)] = 0.75
-    seed: "PositiveInt" = 12345
+    seed: PositiveInt = 12345
 
     @model_validator(mode="after")
     def validate_paths(self) -> Self:
@@ -56,7 +55,7 @@ class DataStepConfig(StepConfig):
                 ),
             )
 
-            field_path = cast("Path", getattr(self, field))
+            field_path: Path = getattr(self, field)
 
             if not field_path.exists():
                 err = f"`{field}` resolved to {field_path}, which does not exist."

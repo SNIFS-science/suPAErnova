@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any
+from typing import Any, Self
 from pathlib import Path
 
 from pydantic import (
@@ -11,19 +11,19 @@ from pydantic import (
 
 
 class PathConfig(BaseModel):
-    base: "DirectoryPath" = Path.cwd()
-    out: "DirectoryPath"
-    log: "DirectoryPath"
+    base: DirectoryPath = Path.cwd()
+    out: DirectoryPath
+    log: DirectoryPath
 
     @classmethod
     def from_config(
         cls,
-        input_config: dict[str, "JsonValue"],
+        input_config: dict[str, JsonValue],
         *,  # Force keyword-only arguments
-        base_path: "DirectoryPath",
-        out_path: "DirectoryPath",
-        log_path: "DirectoryPath",
-    ) -> "PathConfig":
+        base_path: DirectoryPath,
+        out_path: DirectoryPath,
+        log_path: DirectoryPath,
+    ) -> Self:
         config = {
             **cls.default_config(
                 base_path=base_path, out_path=out_path, log_path=log_path
@@ -36,10 +36,10 @@ class PathConfig(BaseModel):
     def default_config(
         cls,
         *,  # Force keyword-only arguments
-        base_path: "DirectoryPath",
-        out_path: "DirectoryPath",
-        log_path: "DirectoryPath",
-    ) -> dict[str, "Any"]:
+        base_path: DirectoryPath,
+        out_path: DirectoryPath,
+        log_path: DirectoryPath,
+    ) -> dict[str, Any]:
         return {"base": base_path, "out": out_path, "log": log_path}
 
     @staticmethod

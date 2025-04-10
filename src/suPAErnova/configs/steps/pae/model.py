@@ -8,7 +8,6 @@ from pydantic import (
     Field,
     PositiveInt,
     PositiveFloat,
-    NonNegativeInt,
     NonNegativeFloat,
     field_validator,
     model_validator,
@@ -24,11 +23,11 @@ Backend = TFBackend | TCHBackend
 
 class PAEModelConfig(StepConfig):
     # --- Class Variables ---
-    id: ClassVar["str"] = "pae_model"
-    required_steps: ClassVar["list[str]"] = [DataStepConfig.id]
+    id: ClassVar[str] = "pae_model"
+    required_steps: ClassVar[list[str]] = [DataStepConfig.id]
 
     # === Required ===
-    backend: "Backend"
+    backend: Backend
     debug: bool = False
 
     @model_validator(mode="after")
@@ -44,8 +43,8 @@ class PAEModelConfig(StepConfig):
 
     # --- Network Design ---
     architecture: Literal["dense", "convolutional"]
-    encode_dims: list["PositiveInt"]
-    decode_dims: list["PositiveInt"] = []
+    encode_dims: list[PositiveInt]
+    decode_dims: list[PositiveInt] = []
 
     @field_validator("encode_dims", mode="before")
     @classmethod

@@ -1,1 +1,3 @@
-from suPAErnova.configs.steps.posterior.posterior import *
+from .posterior import PosteriorStepConfig
+
+__all__ = ["PosteriorStepConfig"]

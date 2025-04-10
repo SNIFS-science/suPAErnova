@@ -8,19 +8,22 @@ from collections.abc import Callable
 import toml
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from suPAErnova.configs.paths import PathConfig
-from suPAErnova.snpae_logging import setup_logging
-from suPAErnova.configs.globals import GlobalConfig
+from suPAErnova.logging import setup_logging
+
+from .paths import PathConfig
+from .globals import GlobalConfig
 
 
-class CallbackFunc[Instance: "Any", Returns](Protocol):
-    def __call__(_self, self: Instance, *args: "Any", **kwargs: "Any") -> Returns: ...
+class CallbackFunc[Instance: Any, Returns](Protocol):
+    def __call__(_self, self: Instance, *args: Any, **kwargs: Any) -> Returns: ...
+
+    __name__: str
 
 
-def callback[Instance: "Any", Returns](
+def callback[Instance: Any, Returns](
     fn: CallbackFunc[Instance, Returns],
-) -> "Callable[..., Returns]":
-    def wrapper(self: "Instance", *args: "Any", **kwargs: "Any") -> "Returns":
+) -> Callable[..., Returns]:
+    def wrapper(self: Instance, *args: Any, **kwargs: Any) -> Returns:
         callbacks: dict[str, Callable[[Instance], None]] = self.options.callbacks.get(
             fn.__name__.lower(), {}
         )
@@ -55,15 +58,15 @@ class SNPAEConfig(BaseModel):
         return self
 
     # Required
-    config: "GlobalConfig"
-    paths: "PathConfig"
-    log: "Logger"
+    config: GlobalConfig
+    paths: PathConfig
+    log: Logger
 
     # Optional
-    callbacks: dict[str, str | dict[str, "Callable[[Any], None]"]] = {}
+    callbacks: dict[str, str | dict[str, Callable[[Any], None]]] = {}
 
     @model_validator(mode="after")
-    def validate_callbacks(self) -> "Self":
+    def validate_callbacks(self) -> Self:
         for fn, callback in self.callbacks.items():
             if isinstance(callback, str):
                 fn_callbacks = {}
@@ -95,15 +98,15 @@ class SNPAEConfig(BaseModel):
     @classmethod
     def from_config(
         cls,
-        input_config: dict[str, "Any"],
-    ) -> "Self":
+        input_config: dict[str, Any],
+    ) -> Self:
         config = {**cls.default_config(input_config), **input_config}
         cfg = cls.model_validate(config)
         cfg.save()
         return cfg
 
     @classmethod
-    def default_config(cls, input_config: dict[str, "Any"]) -> dict[str, "Any"]:
+    def default_config(cls, input_config: dict[str, Any]) -> dict[str, Any]:
         return {
             "log": setup_logging(
                 input_config.get("name", cls.__name__),
@@ -127,7 +130,7 @@ class SNPAEConfig(BaseModel):
             toml.dump(self.model_dump(exclude={"log"}), io)
 
     @staticmethod
-    def normalise_input(input_config: dict[str, "Any"]) -> dict[str, "Any"]:
+    def normalise_input(input_config: dict[str, Any]) -> dict[str, Any]:
         rtn: dict[str, Any] = {}
         for k, v in input_config.items():
             val = v

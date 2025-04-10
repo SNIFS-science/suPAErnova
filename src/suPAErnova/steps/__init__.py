@@ -1,1 +1,3 @@
-from suPAErnova.steps.steps import *
+from .steps import SNPAEStep
+
+__all__ = ["SNPAEStep"]

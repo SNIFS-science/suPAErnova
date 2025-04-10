@@ -14,7 +14,8 @@ from suPAErnova.configs.steps.pae.tf import (
     validate_optimiser,
     validate_activation,
 )
-from suPAErnova.configs.steps.nflow.model import NFlowModelConfig
+
+from .model import NFlowModelConfig
 
 
 class TFNFlowModelConfig(NFlowModelConfig):

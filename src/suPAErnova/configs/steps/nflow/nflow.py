@@ -4,31 +4,32 @@ from typing import Any, ClassVar, get_args
 
 from pydantic import Field, model_validator
 
+from suPAErnova.steps.pae import PAEStep
 from suPAErnova.configs.steps import StepConfig
-from suPAErnova.steps.pae.pae import PAEStep
 from suPAErnova.configs.steps.pae import PAEStepConfig
-from suPAErnova.configs.steps.nflow.tf import TFNFlowModelConfig
-from suPAErnova.configs.steps.nflow.tch import TCHNFlowModelConfig
 from suPAErnova.configs.steps.pae.model import TFBackend, TCHBackend
+
+from .tf import TFNFlowModelConfig
+from .tch import TCHNFlowModelConfig
 
 ModelConfig = TFNFlowModelConfig | TCHNFlowModelConfig
 
 
 class NFlowStepConfig(StepConfig):
     # --- Class Variables ---
-    id: ClassVar["str"] = "nflow"
-    required_steps: ClassVar["list[str]"] = [PAEStepConfig.id]
+    id: ClassVar[str] = "nflow"
+    required_steps: ClassVar[list[str]] = [PAEStepConfig.id]
 
     # --- Previous Steps ---
     pae: PAEStep | None = None
 
     # --- Models ---
     model: ModelConfig
-    models: list["ModelConfig"] = Field(validation_alias="variant")
+    models: list[ModelConfig] = Field(validation_alias="variant")
 
     @model_validator(mode="before")
     @classmethod
-    def prep_model_config(cls, data: "Any") -> "Any":
+    def prep_model_config(cls, data: Any) -> Any:
         if isinstance(data, dict):
             if "model" not in data:
                 err = f"No Base Model has been defined. Please define one in [{cls.id}.model]"

@@ -13,23 +13,23 @@ from pydantic import (  # noqa: TC002
 
 from suPAErnova.steps import SNPAEStep
 from suPAErnova.steps.data import SNPAEData  # noqa: TC001
-from suPAErnova.configs.steps.pae import ModelConfig
 
 if TYPE_CHECKING:
     from logging import Logger
 
-    from suPAErnova.steps.pae import Model
     from suPAErnova.steps.data import DataStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
+
+    from .pae import Model, ModelConfig
 
 
 class Stage(BaseModel):
     stage: PositiveInt
     name: str
     fname: str
-    savepath: "Path | None" = None
-    loadpath: "Path | None" = None
+    savepath: Path | None = None
+    loadpath: Path | None = None
 
     epochs: PositiveInt
     debug: bool
@@ -47,14 +47,14 @@ class Stage(BaseModel):
 
 
 @final
-class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
-    id: ClassVar["str"] = "pae_model"
+class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
+    id: ClassVar[str] = "pae_model"
 
-    def __init__(self, config: "ModelConfig") -> None:
+    def __init__(self, config: C) -> None:
         self.model: M
 
         # --- Superclass Variables ---
-        self.options: ModelConfig
+        self.options: C
         self.config: GlobalConfig
         self.paths: PathConfig
         self.log: Logger
@@ -111,9 +111,9 @@ class PAEModel[M: "Model"](SNPAEStep[ModelConfig]):
         self,
         *,
         data: "DataStep",
-        train_data: "SNPAEData",
-        test_data: "SNPAEData",
-        val_data: "SNPAEData",
+        train_data: SNPAEData,
+        test_data: SNPAEData,
+        val_data: SNPAEData,
     ) -> None:
         # --- Config Variables ---
         # Required

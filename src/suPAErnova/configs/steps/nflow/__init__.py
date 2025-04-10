@@ -1,1 +1,3 @@
-from suPAErnova.configs.steps.nflow.nflow import *
+from .nflow import ModelConfig, NFlowStepConfig
+
+__all__ = ["ModelConfig", "NFlowStepConfig"]

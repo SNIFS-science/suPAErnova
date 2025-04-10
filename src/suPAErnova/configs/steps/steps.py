@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 from types import ModuleType
-from typing import Any, TypeVar, ClassVar, cast, override
+from typing import Any, ClassVar, override
 from inspect import signature
 from pathlib import Path
 from collections.abc import Callable
@@ -10,11 +10,11 @@ from collections.abc import Callable
 from suPAErnova.configs import SNPAEConfig
 from suPAErnova.configs.paths import PathConfig
 
-T = TypeVar("T", bound=Callable[..., Any])
-type ConfigInputObject[T] = str | Path | T
+Fn = Callable[..., Any]
+type ConfigInputObject[T: Fn] = str | Path | T
 
 
-def validate_signature(obj: T, dummy_obj: T, attr: str | None = None) -> T:
+def validate_signature[T: Fn](obj: T, dummy_obj: T, attr: str | None = None) -> T:
     if attr is not None:
         fn_signature = signature(getattr(obj, attr))
         dummy_signature = signature(getattr(dummy_obj, attr))
@@ -39,14 +39,14 @@ def validate_signature(obj: T, dummy_obj: T, attr: str | None = None) -> T:
     return obj
 
 
-def extract_from_module(name: str, mod: ModuleType) -> T:
+def extract_from_module[T: Fn](name: str, mod: ModuleType, _type_hint: type[T]) -> T:
     if not hasattr(mod, name):
         err = f"Module `{mod}` has no attribute `{name}`"
         raise ValueError(err)
     return getattr(mod, name)
 
 
-def extract_from_file(name: str, file: Path) -> T:
+def extract_from_file[T: Fn](name: str, file: Path, _type_hint: type[T]) -> T:
     if not file.exists():
         err = f"File `{file}` does not exist"
         raise ValueError(err)
@@ -58,16 +58,17 @@ def extract_from_file(name: str, file: Path) -> T:
         code = io.read()
     mod = ModuleType(str(file))
     exec(code, mod.__dict__)
-    return extract_from_module(name, mod)
+    return extract_from_module(name, mod, _type_hint)
 
 
-def validate_object(
+def validate_object[T: Fn](
     obj: ConfigInputObject[T],
     *,
     dummy_obj: T,
     mod: ModuleType | None = None,
     attr: str | None = None,
 ) -> T:
+    type_hint = type(dummy_obj)
     if isinstance(obj, str):
         path = Path(obj)
         if path.exists() and path.suffix == ".py":
@@ -76,17 +77,17 @@ def validate_object(
             err = "When specifying a function by name, you must also include a module to extract it from via `validate_function(fn, dummy_fn=dummy_fn, mod=module)"
             raise ValueError(err)
         else:
-            obj = extract_from_module(obj, mod)
+            obj = extract_from_module(obj, mod, type_hint)
     if isinstance(obj, Path):
-        obj = extract_from_file(dummy_obj.__name__, obj)
+        obj = extract_from_file(dummy_obj.__name__, obj, type_hint)
     return validate_signature(obj, dummy_obj, attr=attr)
 
 
 class StepConfig(SNPAEConfig):
     # Class Variables
-    steps: ClassVar["dict[str, type[StepConfig]]"] = {}
-    required_steps: ClassVar["list[str]"] = []
-    id: ClassVar["str"]
+    steps: ClassVar[dict[str, type["StepConfig"]]] = {}
+    required_steps: ClassVar[list[str]] = []
+    id: ClassVar[str]
 
     @classmethod
     def register_step(cls) -> None:
@@ -96,7 +97,7 @@ class StepConfig(SNPAEConfig):
     @classmethod
     def from_config(
         cls,
-        input_config: dict[str, "Any"],
+        input_config: dict[str, Any],
     ) -> "StepConfig":
         step_config = deepcopy(input_config)
         step_config["paths"].out = PathConfig.resolve_path(
@@ -109,4 +110,4 @@ class StepConfig(SNPAEConfig):
             relative_path=step_config["paths"].base,
             mkdir=True,
         )
-        return cast("StepConfig", super().from_config(step_config))
+        return super().from_config(step_config)

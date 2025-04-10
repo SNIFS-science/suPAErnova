@@ -9,9 +9,10 @@ from pydantic import (
 from suPAErnova.steps.data import DataStep
 from suPAErnova.configs.steps import StepConfig
 from suPAErnova.configs.steps.data import DataStepConfig
-from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
-from suPAErnova.configs.steps.pae.tch import TCHPAEModelConfig
-from suPAErnova.configs.steps.pae.model import TFBackend, TCHBackend
+
+from .tf import TFPAEModelConfig
+from .tch import TCHPAEModelConfig
+from .model import TFBackend, TCHBackend
 
 ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
 
@@ -27,11 +28,11 @@ class PAEStepConfig(StepConfig):
 
     # --- Models ---
     model: ModelConfig
-    models: list["ModelConfig"] = Field(validation_alias="variant")
+    models: list[ModelConfig] = Field(validation_alias="variant")
 
     @model_validator(mode="before")
     @classmethod
-    def prep_model_config(cls, data: "Any") -> "Any":
+    def prep_model_config(cls, data: Any) -> Any:
         if isinstance(data, dict):
             if "model" not in data:
                 err = f"No Base Model has been defined. Please define one in [{cls.id}.model]"

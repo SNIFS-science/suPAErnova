@@ -8,51 +8,50 @@ if TYPE_CHECKING:
     from logging import Logger
     from pathlib import Path
 
-    from suPAErnova.steps.pae import (
-        Model as PAE,
-        ModelConfig as PAEConfig,
+    from suPAErnova.steps.nflow import (
+        Model as NFLOW,
+        ModelConfig as NFLOWConfig,
     )
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
-    from suPAErnova.steps.pae.model import PAEModel
-    from suPAErnova.configs.steps.nflow import ModelConfig
+    from suPAErnova.steps.nflow.model import NFlowModel
 
-    from .nflow import Model
+    from .posterior import Model, ModelConfig
 
 
 @final
-class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
-    id: ClassVar[str] = "nflow_model"
+class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
+    id: ClassVar[str] = "posterior_model"
 
     def __init__(self, config: C) -> None:
         self.model: M
 
         # --- Superclass Variables ---
         self.options: C
-        self.config: GlobalConfig
-        self.paths: PathConfig
-        self.log: Logger
+        self.config: "GlobalConfig"
+        self.paths: "PathConfig"
+        self.log: "Logger"
         self.force: bool
         self.verbose: bool
         super().__init__(config)
 
         # --- Config Variabls ---
         self.debug: bool
-        self.savepath: Path
+        self.savepath: "Path"
 
         # --- Previous Step Variables ---
-        self.pae: PAEModel[PAE, PAEConfig]
+        self.nflow: "NFlowModel[NFLOW, NFLOWConfig]"
 
     @override
     def _setup(
         self,
         *,
-        pae: "PAEModel[PAE, PAEConfig]",
+        nflow: "NFlowModel[NFLOW, NFLOWConfig]",
     ) -> None:
         self.debug = self.options.debug
 
-        self.pae = pae
-        self.pae.load()
+        self.nflow = nflow
+        self.nflow.load()
 
         model_cls = get_args(self.__orig_class__)[0]
         self.model = model_cls(self)
@@ -76,7 +75,7 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         model_cls = get_args(self.__orig_class__)[0]
         self.model = model_cls(self)
 
-        self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
+        self.log.debug(f"Loading final Posterior model weights from {self.savepath}")
         self.model.load_checkpoint(self.savepath)
 
     @override
@@ -99,7 +98,7 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         model_cls = get_args(self.__orig_class__)[0]
         self.model = model_cls(self)
 
-        self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
+        self.log.debug(f"Saving final Posterior model weights to {self.savepath}")
         self.model.save_checkpoint(self.savepath)
 
     @override
@@ -107,5 +106,5 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         pass
 
     #
-    # === NFlowModel Specific Functions ===
+    # === Posterior Specific Functions ===
     #

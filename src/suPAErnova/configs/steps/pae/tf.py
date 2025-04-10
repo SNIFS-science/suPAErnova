@@ -1,4 +1,4 @@
-from typing import Any, Concatenate, override
+from typing import Any, Concatenate, cast, override
 from functools import cached_property
 from collections.abc import Callable
 
@@ -7,7 +7,8 @@ import tensorflow as tf
 from tensorflow import keras as ks
 
 from suPAErnova.configs.steps import ConfigInputObject, validate_object
-from suPAErnova.configs.steps.pae.model import PAEModelConfig
+
+from .model import PAEModelConfig
 
 ActivationObject = Callable[[tf.Tensor], tf.Tensor]
 RegulariserObject = type[ks.regularizers.Regularizer] | Callable[[tf.Tensor], tf.Tensor]
@@ -128,7 +129,10 @@ class TFPAEModelConfig(PAEModelConfig):
     @computed_field
     @cached_property
     def optimiser_cls(self) -> type[ks.optimizers.Optimizer]:
-        return validate_optimiser(self.optimiser)
+        return cast(
+            "type[ks.optimizers.Optimizer]",
+            cast("object", validate_optimiser(self.optimiser)),
+        )
 
     loss: ConfigInputObject[LossObject]
 

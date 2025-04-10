@@ -1,7 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 from pathlib import Path
 import pkgutil
 import importlib
@@ -9,6 +9,7 @@ import importlib
 from suPAErnova.configs import callback
 
 if TYPE_CHECKING:
+    from typing import Any
     from logging import Logger
 
     from suPAErnova.configs.paths import PathConfig
@@ -18,8 +19,8 @@ if TYPE_CHECKING:
 
 class SNPAEStep[Config: "StepConfig"]:
     # Class Variables
-    steps: ClassVar["dict[str, type[SNPAEStep[Any]]]"] = {}
-    id: ClassVar["str"]
+    steps: ClassVar[dict[str, type["SNPAEStep[Any]"]]] = {}
+    id: ClassVar[str]
 
     @classmethod
     def register_step(cls) -> None:
@@ -34,7 +35,7 @@ class SNPAEStep[Config: "StepConfig"]:
             if is_pkg:
                 importlib.import_module(f"{base_name}.{module}")
 
-    def __init__(self, config: "Config") -> None:
+    def __init__(self, config: Config) -> None:
         # Class Variables
         self.__class__.id = config.__class__.id
         self.name: str = (

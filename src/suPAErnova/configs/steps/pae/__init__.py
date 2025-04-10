@@ -1,1 +1,3 @@
-from suPAErnova.configs.steps.pae.pae import *
+from .pae import ModelConfig, PAEStepConfig
+
+__all__ = ["ModelConfig", "PAEStepConfig"]

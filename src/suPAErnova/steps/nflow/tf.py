@@ -21,9 +21,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from suPAErnova.steps.pae.tf import S, FTensor, TFPAEModel, TensorCompatible
-    from suPAErnova.steps.data.data import DataStep
-    from suPAErnova.steps.nflow.model import NFlowModel
     from suPAErnova.configs.steps.nflow.tf import TFNFlowModelConfig
+
+    from .model import NFlowModel
 
     # === Custom Types
     NFlowInputs = FTensor[S["batch_dim n_latents"]]
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 @keras.saving.register_keras_serializable("SuPAErnova")
 class TFNFlowLoss(ks.losses.Loss):
     @override
-    def call(self, y_true: "tf.Tensor", y_pred: "tf.Tensor") -> "tf.Tensor":
+    def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
         return -y_pred
 
 
@@ -41,7 +41,7 @@ class TFNFlowLoss(ks.losses.Loss):
 class TFNFlowModel(ks.Model):
     def __init__(
         self,
-        config: "NFlowModel[TFNFlowModel]",
+        config: "NFlowModel[TFNFlowModel, TFNFlowModelConfig]",
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
@@ -52,7 +52,7 @@ class TFNFlowModel(ks.Model):
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
         self.debug: bool = options.debug
-        self.pae: TFPAEModel = config.pae.model
+        self.pae: TFPAEModel = cast("TFPAEModel", config.pae.model)
 
         # --- Training ---
         self.built: bool = False

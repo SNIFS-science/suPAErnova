@@ -8,11 +8,11 @@ from astropy import cosmology as cosmo
 import sncosmo
 from pydantic import BaseModel, ConfigDict
 
-from suPAErnova.steps import SNPAEStep
 from suPAErnova.configs.steps.data import DataStepConfig
 
+from .steps import SNPAEStep
+
 if TYPE_CHECKING:
-    from typing import TypeVar
     from logging import Logger
     from collections.abc import Iterable, Sequence
 
@@ -21,40 +21,38 @@ if TYPE_CHECKING:
 
     SNeDataFrame = pd.DataFrame
 
-    T = TypeVar("T", bound=np.generic)
-
 
 class SNPAEData(BaseModel):
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
 
-    ind: "npt.NDArray[np.int32]"
-    nspectra: "npt.NDArray[np.int32]"
-    sn_name: "npt.NDArray[np.str_]"
-    dphase: "npt.NDArray[np.float32]"
-    redshift: "npt.NDArray[np.float32]"
-    x0: "npt.NDArray[np.float32]"
-    x1: "npt.NDArray[np.float32]"
-    c: "npt.NDArray[np.float32]"
-    MB: "npt.NDArray[np.float32]"
-    hubble_residual: "npt.NDArray[np.float32]"
-    luminosity_distance: "npt.NDArray[np.float32]"
-    spectra_id: "npt.NDArray[np.int64]"
-    phase: "npt.NDArray[np.float32]"
-    wl_mask_min: "npt.NDArray[np.float32]"
-    wl_mask_max: "npt.NDArray[np.float32]"
-    amplitude: "npt.NDArray[np.float32]"
-    sigma: "npt.NDArray[np.float32]"
-    salt_flux: "npt.NDArray[np.float32]"
-    wavelength: "npt.NDArray[np.float32]"
-    mask: "npt.NDArray[np.int32]"
-    time: "npt.NDArray[np.float32]"
+    ind: npt.NDArray[np.int32]
+    nspectra: npt.NDArray[np.int32]
+    sn_name: npt.NDArray[np.str_]
+    dphase: npt.NDArray[np.float32]
+    redshift: npt.NDArray[np.float32]
+    x0: npt.NDArray[np.float32]
+    x1: npt.NDArray[np.float32]
+    c: npt.NDArray[np.float32]
+    MB: npt.NDArray[np.float32]
+    hubble_residual: npt.NDArray[np.float32]
+    luminosity_distance: npt.NDArray[np.float32]
+    spectra_id: npt.NDArray[np.int64]
+    phase: npt.NDArray[np.float32]
+    wl_mask_min: npt.NDArray[np.float32]
+    wl_mask_max: npt.NDArray[np.float32]
+    amplitude: npt.NDArray[np.float32]
+    sigma: npt.NDArray[np.float32]
+    salt_flux: npt.NDArray[np.float32]
+    wavelength: npt.NDArray[np.float32]
+    mask: npt.NDArray[np.int32]
+    time: npt.NDArray[np.float32]
 
 
 class DataStep(SNPAEStep[DataStepConfig]):
     # Class Variables
-    id: ClassVar["str"] = "data"
+    id: ClassVar[str] = "data"
 
-    def __init__(self, config: "DataStepConfig") -> None:
+    def __init__(self, config: DataStepConfig) -> None:
         # --- Superclass Variables ---
         self.options: DataStepConfig
         self.config: GlobalConfig
@@ -200,10 +198,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
         # Load data from files
         # Open the file, read each key into a dictionary, then close the file
         self.log.debug(f"Loading data arrays from {self.out_data}")
-        data = {}
         with np.load(self.out_data, allow_pickle=True) as io:
-            for k, v in io.items():
-                data[k] = v
+            data = dict(io)
         self.data = SNPAEData.model_validate(data)
 
         # Load in training and testing data
@@ -383,14 +379,14 @@ class DataStep(SNPAEStep[DataStepConfig]):
         self.log.debug("Calculating SALT fluxes")
 
         def get_salt_flux(
-            wavelength: "npt.NDArray[np.float32]",
+            wavelength: npt.NDArray[np.float32],
             tobs: float = 0.0,
             z: float = 0.0,
             x0: float = 1.0,
             x1: float = 0.0,
             c: float = 0.0,
             zref: float = 0.05,
-        ) -> "npt.NDArray[np.float32]":
+        ) -> npt.NDArray[np.float32]:
             self.salt_model.set(x0=x0, x1=x1, c=c)
             return (
                 self.salt_model.flux(phase=tobs, wave=wavelength)
@@ -453,10 +449,10 @@ class DataStep(SNPAEStep[DataStepConfig]):
 
         # Given an array of shape sn_dim by N <= nspec_dim
         # Create an array of shape sn_dim by nspec_dim, padding if needed
-        def pad(
+        def pad[T: np.generic](
             arr: "Iterable[Sequence[T | npt.NDArray[T]]]",
-            padding: "T | npt.NDArray[T]",
-        ) -> "npt.NDArray[T]":
+            padding: T | npt.NDArray[T],
+        ) -> npt.NDArray[T]:
             if isinstance(padding, np.ndarray):
                 padded_arr: npt.NDArray[T] = np.full(
                     (self.sn_dim, self.nspec_dim, *padding.shape),
@@ -471,7 +467,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
 
         # Given a list of value-per-row of length sn_dim
         # Fill each row with nspec_dim repeats of that row's value
-        def fill_rows(values: "npt.NDArray[T]") -> "npt.NDArray[T]":
+        def fill_rows[T: np.generic](values: npt.NDArray[T]) -> npt.NDArray[T]:
             return np.repeat(values, phase_axis).reshape((self.sn_dim, self.nspec_dim))
 
         # Index of each SNe
