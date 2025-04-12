@@ -7,6 +7,7 @@ from typing import (
 )
 
 import keras
+import numpy as np
 import tensorflow as tf
 from tensorflow import keras as ks
 import tensorflow_probability as tfp
@@ -20,8 +21,6 @@ if TYPE_CHECKING:
     from suPAErnova.steps.pae.tf import (
         S,
         FTensor,
-        ITensor,
-        TFPAEModel,
         TensorCompatible,
     )
     from suPAErnova.steps.nflow.tf import TFNFlowModel
@@ -32,20 +31,16 @@ if TYPE_CHECKING:
 
     # === Custom Types ===
 
-    PosteriorData = tuple[
-        FTensor[S["batch_dim nspec_dim phase_dim"]],
-        FTensor[S["batch_dim nspec_dim wl_dim"]],
-        FTensor[S["batch_dim nspec_dim wl_dim"]],
-    ]
-    PosteriorMask = FTensor[S["batch_dim nspec_dim wl_dim"]]
-    PosteriorVars = tuple[
-        FTensor[S["batch_dim nspec_dim n_μs"]],
-        FTensor[S["batch_dim nspec_dim 1"]],
-        FTensor[S["batch_dim nspec_dim 1"]],
-        FTensor[S["batch_dim nspec_dim 1"]],
-    ]
-    PosteriorInputs = tuple[PosteriorData, PosteriorVars]
-    PosteriorOutputs = FTensor[S["batch_dim nspec_dim n_μs"]]
+
+class MinimiserResults(NamedTuple):
+    converged: tf.Tensor
+    failed: tf.Tensor
+    num_objective_evaluations: int
+    position: tf.Tensor
+    objective_value: tf.Tensor
+    objective_gradient: tf.Tensor
+    position_deltas: tf.Tensor
+    gradient_deltas: tf.Tensor
 
 
 @keras.saving.register_keras_serializable("SuPAErnova")
@@ -75,25 +70,14 @@ class TFPosteriorModel(ks.Model):
         # --- Previous Steps ---
         self.nflow: "TFNFlowModel" = cast("TFNFlowModel", config.nflow.model)
 
-        # --- Variables ---
-        # Initial values
-        self.initial_bias: "FTensor[S['batch_dim nspec_dim 1']]"
-        self.initial_delta_m: "FTensor[S['batch_dim nspec_dim 1']]"
-        self.initial_delta_p: "FTensor[S['batch_dim nspec_dim 1']]"
-        self.initial_us: "FTensor[S['batch_dim nspec_dim n_μs']]"
-        self.initial_latents: "FTensor[S['batch_dim nspec_dim n_latents']]"
-
-        # Updated values
-        self.bias: tf.Variable
-        self.delta_m: tf.Variable
-        self.delta_p: tf.Variable
-        self.us: "FTensor[S['batch_dim nspec_dim n_μs']]"
-        self.latents: "FTensor[S['batch_dim nspec_dim n_latents']]"
-        self.data: "PosteriorData"
-        self.pos: "PosteriorVars"
-        self.mask: "PosteriorMask"
+        # --- Data ---
         self.recon_error: tf.Tensor
         self.recon_error_centers: tf.Tensor
+        self.batch_dim: int
+        self.nspec_dim: int
+        self.n_latents: int = self.nflow.pae.n_zs + (
+            1 if self.nflow.physical_latents else 0
+        )
 
         # --- Training ---
         self.built: bool = False
@@ -101,8 +85,7 @@ class TFPosteriorModel(ks.Model):
         self.save_best: bool = options.save_best
         self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
         self.model_path: str = f"{'best' if self.save_best else 'latest'}.model.keras"
-        self.n_samples: int
-        self.nspec_dim: int
+
         self.random_initial_positions: bool = options.random_initial_positions
         self.tolerance: float = options.tolerance
         self.max_iterations: int = options.max_iterations
@@ -112,13 +95,51 @@ class TFPosteriorModel(ks.Model):
         )
         self.stage: Stage
 
+        # --- Variables ---
+        # Initial values
+        self.init_zs: "FTensor[S['batch_dim n_zs']] | None" = None
+        self.init_latents: "FTensor[S['batch_dim n_latents']] | None" = None
+        self.init_delta_av: "FTensor[S['batch_dim 1']] | None" = None
+        self.init_delta_m: "FTensor[S['batch_dim 1']] | None" = None
+        self.init_delta_p: "FTensor[S['batch_dim 1']] | None" = None
+        self.init_bias: "FTensor[S['batch_dim 1']] | None" = None
+
+        # Current values
+        self.curr_zs: "FTensor[S['batch_dim n_zs']]"
+        self.curr_latents: "FTensor[S['batch_dim n_latents']]"
+        self.curr_delta_av: "FTensor[S['batch_dim 1']]"
+        self.curr_delta_m: "FTensor[S['batch_dim 1']]"
+        self.curr_delta_p: "FTensor[S['batch_dim 1']]"
+        self.curr_bias: "FTensor[S['batch_dim 1']]"
+
+        # Best values
+        self.best_zs: "FTensor[S['batch_dim n_zs']] | None" = None
+        self.best_latents: "FTensor[S['batch_dim n_latents']] | None" = None
+        self.best_delta_av: "FTensor[S['batch_dim 1']] | None" = None
+        self.best_delta_m: "FTensor[S['batch_dim 1']] | None" = None
+        self.best_delta_p: "FTensor[S['batch_dim 1']] | None" = None
+        self.best_bias: "FTensor[S['batch_dim 1']] | None" = None
+
         # --- Layers ---
-        self.n_us: int = self.nflow.pae.n_latents - 2  # ΔAᵥ + zs
-        self.u_prior: tfd.MultivariateNormalDiag = tfd.MultivariateNormalDiag(
-            loc=tf.zeros(self.n_us), scale_diag=tf.ones(self.n_us)
+        self.latents_mean: float = options.latents_mean
+        self.latents_std: float = options.latents_std
+        self.latents_prior: tfd.MultivariateNormalDiag = tfd.MultivariateNormalDiag(
+            loc=self.latents_mean * tf.ones(self.n_latents),
+            scale_diag=self.latents_mean * tf.ones(self.n_latents),
+        )
+
+        self.train_delta_av: bool = options.train_delta_av
+        self.delta_av_min: float = options.delta_av_min
+        self.delta_av_max: float = options.delta_av_max
+        self.delta_av_mean: float = options.delta_av_mean
+        self.delta_av_std: float = options.delta_av_std
+        self.delta_av_prior: tdf.Normal = tfd.Normal(
+            loc=self.delta_av_mean, scale=self.delta_av_std
         )
 
         self.train_delta_m: bool = options.train_delta_m
+        self.delta_m_min: float = options.delta_m_min
+        self.delta_m_max: float = options.delta_m_max
         self.delta_m_mean: float = options.delta_m_mean
         self.delta_m_std: float = options.delta_m_std
         self.delta_m_prior: tdf.Normal = tfd.Normal(
@@ -126,31 +147,35 @@ class TFPosteriorModel(ks.Model):
         )
 
         self.train_delta_p: bool = options.train_delta_p
+        self.delta_p_min: float = options.delta_p_min
+        self.delta_p_max: float = options.delta_p_max
         self.delta_p_mean: float = options.delta_p_mean
         self.delta_p_std: float = options.delta_p_std
         self.delta_p_prior: tfd.Normal = tfd.Normal(
             loc=self.delta_p_mean, scale=self.delta_p_std
         )
 
+        self.train_bias: bool = options.train_bias
+        self.bias_min: float = options.bias_min
+        self.bias_max: float = options.bias_max
+        self.bias_mean: float = options.bias_mean
+        self.bias_std: float = options.bias_std
+        self.bias_prior: tfd.Normal = tfd.Normal(
+            loc=self.bias_mean, scale=self.bias_std
+        )
+
+        self.best_chain: tf.Tensor
+        self.best_converged: tf.Tensor
+        self.best_objective_value: tf.Tensor
+        self.num_evals: int
+
         self.u_likelihood: tfd.Independent
 
-        self.results: NamedTuple
-
         # --- Metrics ---
+        self.results: MinimiserResults
+
+        # --- Losses ---
         self._loss_terms: dict[str, "FTensor[S['']]"]
-        self.chain_min: tf.Tensor
-        self.converged: tf.Tensor
-        self.num_evals: tf.Tensor
-        self.neg_log_like: tf.Tensor
-        self.delta_m_val: tf.Tensor
-        self.init_delta_m_val: tf.Tensor
-        self.delta_p_val: tf.Tensor
-        self.init_delta_p_val: tf.Tensor
-        self.us_val: tf.Tensor
-        self.init_us_val: tf.Tensor
-        self.bias_val: tf.Tensor
-        self.init_bias_val: tf.Tensor
-        self.initialised: bool = False
         self.loss_tracker: ks.metrics.Metric = ks.metrics.Mean("loss")
 
     @property
@@ -161,19 +186,7 @@ class TFPosteriorModel(ks.Model):
         # or at the start of `evaluate()`.
         # If you don't implement this property, you have to call
         # `reset_states()` yourself at the time of your choosing.
-        return [
-            self.loss_tracker
-            # self.chain_min,
-            # self.converged,
-            # self.num_evals,
-            # self.neg_log_like,
-            # self.delta_m_val,
-            # self.init_delta_m_val,
-            # self.delta_p_val,
-            # self.init_delta_p_val,
-            # self.us_val,
-            # self.init_us_val,
-        ]
+        return [self.loss_tracker]
 
     @override
     def call(
@@ -183,23 +196,8 @@ class TFPosteriorModel(ks.Model):
         mask: "TensorCompatible | None" = None,
     ) -> "PosteriorOutputs":
         training = False if training is None else training
-        ((input_phase, input_amplitude, input_d_amplitude), pos) = inputs
-
-        pos = cast("FTensor[S['batch_dim nspec_dim n_μs + 3']]", cast("object", pos))
-        us = pos[:, :, : self.n_us]
-        delta_m = pos[:, :, self.n_us : self.n_us + 1]
-        delta_p = pos[:, :, self.n_us + 1 : self.n_us + 2]
-        bias = pos[:, :, self.n_us + 2 :]
-        zs = tf.concat(
-            (
-                self.nflow.pdf.bijector.forward(us),
-                delta_m,
-                delta_p,
-            ),
-            axis=-1,
-        )
-        zs = ks.layers.RepeatVector(self.nspec_dim)(zs[:, 0, :])
-
+        (data, position) = inputs
+        (input_phase, input_amplitude, input_d_amplitude) = data
         input_mask = tf.cast(
             (
                 mask
@@ -209,23 +207,68 @@ class TFPosteriorModel(ks.Model):
             tf.float32,
         )
 
+        latents = position[:, : self.n_latents]
+        self.curr_latents = latents
+
+        if self.train_delta_av or self.nflow.physical_latents:
+            delta_av = tf.expand_dims(latents[:, 0], axis=-1)
+            self.curr_delta_av = delta_av
+        else:
+            delta_av = self.curr_delta_av
+
+        idx = 0
+        if self.train_delta_m:
+            delta_m = tf.expand_dims(position[:, self.n_latents + idx], axis=-1)
+            self.curr_delta_m = delta_m
+            idx += 1
+        else:
+            delta_m = self.curr_delta_m
+
+        if self.train_delta_p:
+            delta_p = tf.expand_dims(position[:, self.n_latents + idx], axis=-1)
+            self.curr_delta_p = delta_p
+            idx += 1
+        else:
+            delta_p = self.curr_delta_p
+
+        if self.train_bias:
+            bias = tf.expand_dims(position[:, self.n_latents + idx], axis=-1)
+            self.curr_bias = bias
+        else:
+            bias = self.curr_bias
+
+        pae_latents = tf.concat(
+            (
+                self.nflow.flow.bijector.forward(latents),
+                delta_m,
+                delta_p,
+            ),
+            axis=-1,
+        )
+        pae_latents = ks.layers.RepeatVector(self.nspec_dim)(pae_latents)
+
         amplitude = self.nflow.pae.decoder(
-            (zs, input_phase), training=False, mask=input_mask
+            (pae_latents, input_phase), training=False, mask=input_mask
         )
 
-        if not self.nflow.physical_latents:
-            amplitude *= delta_m
-        amplitude += bias
+        if self.train_delta_m:
+            amplitude *= tf.expand_dims(delta_m, axis=-1)
+        if self.train_bias:
+            amplitude += tf.expand_dims(bias, axis=-1)
+        phase = input_phase
+        if self.train_delta_p:
+            phase += tf.expand_dims(delta_p, axis=-1)
+        phase = phase[:, 0, :]
 
         # Measured average AE reconstruction error at current times
         mean_pae_recon_error = tf.transpose(
             tfp.math.interp_regular_1d_grid(
-                x=tf.transpose(input_phase + delta_p),
+                x=tf.transpose(phase),
                 x_ref_min=self.recon_error_centers[0],
                 x_ref_max=self.recon_error_centers[-1],
                 y_ref=self.recon_error,
             )
-        )[:, 0, :]
+        )
 
         std_amplitude = tf.sqrt(
             (amplitude * mean_pae_recon_error) ** 2 + input_d_amplitude**2
@@ -238,15 +281,17 @@ class TFPosteriorModel(ks.Model):
             reinterpreted_batch_ndims=0,
         )
 
-        log_prior: "FTensor[S['batch_dim nspec_dim']]" = self.u_prior.log_prob(us)
+        log_prior = self.latents_prior.log_prob(latents)
 
-        log_likelihood: "FTensor[S['batch_dim']]" = self.u_likelihood.log_prob(
-            input_amplitude * input_mask
+        log_likelihood = self.u_likelihood.log_prob(input_amplitude * input_mask)
+
+        spec_mask = tf.reduce_min(input_mask, axis=-1)
+        n_unmasked_specs = tf.reduce_sum(
+            tf.cast(input_amplitude[:, :, 0] > 0, tf.float32), axis=1
         )
-
-        mean_log_likelihood = tf.reduce_sum(
-            log_likelihood, axis=-1, keepdims=True
-        ) / tf.reduce_sum(input_mask)
+        mean_log_likelihood = (
+            tf.reduce_sum(log_likelihood * spec_mask, axis=-1) / n_unmasked_specs
+        )
 
         return log_prior + mean_log_likelihood
 
@@ -257,7 +302,7 @@ class TFPosteriorModel(ks.Model):
         *,
         training: bool | None = None,
         mask: "TensorCompatible | None" = None,
-    ) -> "FTensor[S['batch_dim nspec_dim n_μs']]":
+    ) -> "FTensor[S['batch_dim n_latents']]":
         training = False if training is None else training
         return super().__call__(inputs, training=training, mask=mask)
 
@@ -266,102 +311,78 @@ class TFPosteriorModel(ks.Model):
         self,
         data: "TensorCompatible",
     ) -> dict[str, tf.Tensor | dict[str, tf.Tensor]]:
-        training = True
+        training = False
 
         # === Per Chain Setup ===
         # Fixed RNG
         tf.random.set_seed(self._chain)
         self._chain += 1
+        (phase, amplitude, d_amplitude), mask, init_position = self.prep_data()
 
-        self.prep_data()
-        phase, amplitude, d_amplitude = self.data
-        mask = self.mask
-        position = self.pos
-
-        position = tf.concat(position, axis=-1)
-        init_us = position[:, :, : self.n_us]
-        init_delta_m = position[:, :, self.n_us : self.n_us + 1]
-        init_delta_p = position[:, :, self.n_us + 1 : self.n_us + 2]
-        init_bias = position[:, :, self.n_us + 2 :]
-
-        def vals_and_grads(pos: "PosteriorVars"):
-            inputs = ((phase, amplitude, d_amplitude), pos)
-            log_prob = self(inputs, training=True, mask=mask)
+        def vals_and_grads(position: "PosteriorVars") -> "FTensor[S['']]":
+            inputs = ((phase, amplitude, d_amplitude), position)
+            log_prob = self(inputs, training=training, mask=mask)
             return self._loss(tf.zeros_like(log_prob), log_prob)
 
-        def lbfgs(x: "PosteriorVars"):
-            return tfp.math.value_and_gradient(vals_and_grads, x)
+        def lbfgs(x: "PosteriorVars") -> "tuple(FTensor[S['']], FTensor[S['']])":
+            return tfp.math.value_and_gradient(
+                vals_and_grads, x, auto_unpack_single_arg=False
+            )
 
         self.results = tfp.optimizer.lbfgs_minimize(
             lbfgs,
-            initial_position=position,
+            initial_position=init_position,
             tolerance=self.tolerance,
             x_tolerance=self.tolerance,
             max_iterations=self.max_iterations,
             num_correction_pairs=1,
         )
 
-        pos = self.results.position
-        us = pos[:, :, : self.n_us]
-        delta_m = pos[:, :, self.n_us : self.n_us + 1]
-        delta_p = pos[:, :, self.n_us + 1 : self.n_us + 2]
-        bias = pos[:, :, self.n_us + 2 :]
+        position = self.results.position
 
-        self.pos = (
-            tf.convert_to_tensor(self.us),
-            tf.convert_to_tensor(self.delta_m),
-            tf.convert_to_tensor(self.delta_p),
-            tf.convert_to_tensor(self.bias),
-        )
-
-        if not self.initialised:
-            self.chain_min = tf.zeros(self.n_samples)
-            self.converged = self.results.converged
-            self.num_evals = self.results.num_objective_evaluations
-            self.neg_log_like = self.results.objective_value
-            self.delta_m_val = delta_m
-            self.init_delta_m_val = init_delta_m
-            self.delta_p_val = delta_p
-            self.init_delta_p_val = init_delta_p
-            self.us_val = us
-            self.init_us_val = init_us
-            self.bias_val = bias
-            self.init_bias_val = init_bias
-            self.initialised = True
+        latents = position[:, : self.n_latents]
+        zs = self.nflow.flow.bijector.forward(latents)
+        if self.train_delta_av or self.nflow.physical_latents:
+            delta_av = tf.expand_dims(latents[:, 0], axis=-1)
         else:
-            improved = self.results.objective_value < self.neg_log_like
-            self.chain_min = tf.where(
-                improved[:, 0],
-                self._chain * tf.ones_like(self.chain_min),
-                self.chain_min,
-            )
-            self.converged = tf.where(improved, self.results.converged, self.converged)
-            self.num_evals += self.results.num_objective_evaluations
-            self.neg_log_like = tf.where(
-                improved, self.results.objective_value, self.neg_log_like
-            )
-            self.delta_m_val = tf.where(
-                tf.expand_dims(improved, axis=-1), delta_m, self.delta_m_val
-            )
-            self.init_delta_m_val = tf.where(
-                tf.expand_dims(improved, axis=-1), init_delta_m, self.init_delta_m_val
-            )
-            self.delta_p_val = tf.where(
-                tf.expand_dims(improved, axis=-1), delta_p, self.delta_p_val
-            )
-            self.init_delta_p_val = tf.where(
-                tf.expand_dims(improved, axis=-1), init_delta_p, self.init_delta_p_val
-            )
-            self.us_val = tf.where(tf.expand_dims(improved, axis=-1), us, self.us_val)
-            self.init_us_val = tf.where(
-                tf.expand_dims(improved, axis=-1), init_us, self.init_us_val
-            )
-            self.bias_val = tf.where(
-                tf.expand_dims(improved, axis=-1), bias, self.bias_val
-            )
-            self.init_bias_val = tf.where(
-                tf.expand_dims(improved, axis=-1), init_bias, self.init_bias_val
-            )
+            delta_av = self.curr_delta_av
+
+        idx = 0
+        if self.train_delta_m:
+            delta_m = tf.expand_dims(position[:, self.n_latents + idx], axis=-1)
+            idx += 1
+        else:
+            delta_m = self.curr_delta_m
+
+        if self.train_delta_p:
+            delta_p = tf.expand_dims(position[:, self.n_latents + idx], axis=-1)
+            idx += 1
+        else:
+            delta_p = self.curr_delta_p
+
+        if self.train_bias:
+            bias = tf.expand_dims(position[:, self.n_latents + idx], axis=-1)
+        else:
+            bias = self.curr_bias
+
+        improved = self.results.objective_value < self.best_objective_value
+        self.best_objective_value = tf.where(
+            improved, self.results.objective_value, self.best_objective_value
+        )
+        self.best_chain = tf.where(
+            improved, self._chain * tf.ones_like(self.best_chain), self.best_chain
+        )
+        self.best_converged = tf.where(
+            improved, self.results.converged, self.best_converged
+        )
+        self.num_evals += self.results.num_objective_evaluations
+
+        self.best_zs = tf.where(improved, zs, self.best_zs)
+        self.best_latents = tf.where(improved, latents, self.best_latents)
+        self.best_delta_av = tf.where(improved, delta_av, self.best_delta_av)
+        self.best_delta_m = tf.where(improved, delta_m, self.best_delta_m)
+        self.best_delta_p = tf.where(improved, delta_p, self.best_delta_p)
+        self.best_bias = tf.where(improved, bias, self.best_bias)
 
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
@@ -396,8 +417,6 @@ class TFPosteriorModel(ks.Model):
         # Terminate training when a NaN loss is encountered
         callbacks.append(ks.callbacks.TerminateOnNaN())
 
-        self.prep_data()
-
         if stage.loadpath is not None:
             self.load_checkpoint(stage.loadpath)
         else:
@@ -406,11 +425,10 @@ class TFPosteriorModel(ks.Model):
         # === Train ===
         self._chain = 0
         return self.fit(
-            x=(*self.data, self.mask),
-            y=self.pos,
+            self.prep_data(),
             initial_epoch=self._chain,
             epochs=self.stage.n_chains,
-            batch_size=self.mask.shape[0],
+            batch_size=self.batch_dim,
             callbacks=callbacks,
             # verbose=0,
         )
@@ -419,15 +437,40 @@ class TFPosteriorModel(ks.Model):
         self,
     ) -> None:
         if not self.built:
+            # === Prep Data ===
+            train_phase = self.stage.train_data.phase
+            train_d_phase = self.stage.train_data.dphase
+            train_amplitude = self.stage.train_data.amplitude
+            train_d_amplitude = self.stage.train_data.sigma
+            train_mask = self.stage.train_data.mask
+            self.batch_dim = train_phase.shape[0]
+            self.nspec_dim = train_phase.shape[1]
+
+            self.best_objective_value = np.inf * tf.ones((self.batch_dim, 1))
+            self.best_chain = tf.zeros((self.batch_dim, 1))
+            self.best_converged = tf.cast(tf.zeros((self.batch_dim, 1)), tf.bool)
+            self.num_evals = 0
+
+            self.recon_error, _recon_error_edges, self.recon_error_centers = (
+                self.nflow.pae.recon_error((
+                    tf.convert_to_tensor(train_phase, dtype=tf.float32),
+                    tf.convert_to_tensor(train_d_phase, dtype=tf.float32),
+                    tf.convert_to_tensor(train_amplitude, dtype=tf.float32),
+                    tf.convert_to_tensor(train_d_amplitude, dtype=tf.float32),
+                    tf.convert_to_tensor(train_mask, dtype=tf.int32),
+                ))
+            )
+
+            data, mask, position = self.prep_data()
             loss = self._loss
             self.compile(
                 loss=loss,
                 run_eagerly=self.stage.debug,
             )
             self(
-                (self.data, tf.concat(self.pos, axis=-1)),
+                (data, position),
                 training=False,
-                mask=self.mask,
+                mask=mask,
             )
 
             self.log.debug("Trainable variables:")
@@ -445,159 +488,154 @@ class TFPosteriorModel(ks.Model):
         self.build_model()
         self.load_weights(loadpath / self.weights_path)
 
-    def prep_data(self) -> None:
-        # === Prep Data ===
+    def prep_data(self) -> "tuple[PosteriorData, PosteriorMask, PosteriorPosition]":
         train_phase = self.stage.train_data.phase
-        train_d_phase = self.stage.train_data.dphase
         train_amplitude = self.stage.train_data.amplitude
         train_d_amplitude = self.stage.train_data.sigma
         train_mask = self.stage.train_data.mask
-        self.n_samples = train_phase.shape[0]
-        self.nspec_dim = train_phase.shape[1]
 
-        recon_error, _recon_error_edges, recon_error_centers = (
-            self.nflow.pae.recon_error((
-                tf.convert_to_tensor(train_phase, dtype=tf.float32),
-                tf.convert_to_tensor(train_d_phase, dtype=tf.float32),
-                tf.convert_to_tensor(train_amplitude, dtype=tf.float32),
-                tf.convert_to_tensor(train_d_amplitude, dtype=tf.float32),
-                tf.convert_to_tensor(train_mask, dtype=tf.int32),
-            ))
-        )
-        self.recon_error = recon_error
-        self.recon_error_centers = recon_error_centers
+        data = (train_phase, train_amplitude, train_d_amplitude)
+        mask = train_mask
 
-        initial_bias = tf.zeros((self.n_samples, 1))
-        self.initial_bias = ks.layers.RepeatVector(self.nspec_dim)(initial_bias)
-        self.bias = tf.Variable(self.initial_bias)
-        self.bias.assign(self.initial_bias)
-        # TODO: This is terrible, make it better
-        if self.stage.name == "init":
+        # --- Latents / Zs ---
+        if self.stage.init_latents == "init":
             if self.random_initial_positions:
-                initial_delta_m = tf.expand_dims(
-                    self.delta_m_prior.sample(self.n_samples), axis=-1
-                )
-                self.initial_delta_m = ks.layers.RepeatVector(self.nspec_dim)(
-                    initial_delta_m
-                )
-                initial_delta_p = tf.expand_dims(
-                    self.delta_p_prior.sample(self.n_samples), axis=-1
-                )
-                self.initial_delta_p = ks.layers.RepeatVector(self.nspec_dim)(
-                    initial_delta_p
-                )
-                initial_us = self.u_prior.sample(self.n_samples)
-                self.initial_us = ks.layers.RepeatVector(self.nspec_dim)(initial_us)
-                initial_latents = self.nflow.pdf.bijector.forward(initial_us)
-                self.initial_latents = ks.layers.RepeatVector(self.nspec_dim)(
-                    initial_latents
-                )
+                self.stage.init_latents = "random"
             else:
-                self.initial_latents = self.nflow.pae.encoder(
-                    (
-                        tf.convert_to_tensor(train_phase),
-                        tf.convert_to_tensor(train_amplitude),
-                    ),
-                    training=False,
-                    mask=train_mask,
-                )
-                initial_us = self.nflow.pdf.bijector.inverse(
-                    self.nflow.get_data(self.initial_latents)
-                )
-                self.initial_us = ks.layers.RepeatVector(self.nspec_dim)(initial_us)
-                self.initial_delta_m = self.initial_latents[:, :, -2:-1]
-                self.initial_delta_p = self.initial_latents[:, :, -1:]
-        elif self.stage.name == "early":
-            initial_delta_m = tf.expand_dims(
-                self.delta_m_prior.sample(self.n_samples), axis=-1
+                self.stage.init_latents = "data"
+        if self.stage.init_latents == "random":
+            init_latents = self.latents_prior.sample(self.batch_dim)
+            init_zs = self.nflow.flow.bijector.forward(init_latents)
+        elif self.stage.init_latents == "data":
+            init_zs = self.nflow.pae.encoder(
+                (
+                    tf.convert_to_tensor(train_phase),
+                    tf.convert_to_tensor(train_amplitude),
+                ),
+                training=False,
+                mask=train_mask,
             )
-            self.initial_delta_m = ks.layers.RepeatVector(self.nspec_dim)(
-                initial_delta_m
-            )
-            initial_delta_p = tf.expand_dims(
-                self.delta_p_prior.sample(self.n_samples), axis=-1
-            )
-            self.initial_delta_p = ks.layers.RepeatVector(self.nspec_dim)(
-                initial_delta_p
-            )
-            initial_us = self.u_prior.sample(self.n_samples)
-            self.initial_us = ks.layers.RepeatVector(self.nspec_dim)(initial_us)
-            initial_latents = self.nflow.pdf.bijector.forward(initial_us)
-            self.initial_latents = ks.layers.RepeatVector(self.nspec_dim)(
-                initial_latents
-            )
-        elif self.stage.name == "mid":
-            delta_m_max = 1.5
-            delta_m_min = -1.5
-            d_delta_m = (delta_m_max - delta_m_min) / (10 - 1)
-            initial_delta_m = tf.expand_dims(
-                tf.zeros(self.n_samples) + delta_m_min + (self._chain - 10) * d_delta_m,
-                axis=-1,
-            )
-            self.initial_delta_m = ks.layers.RepeatVector(self.nspec_dim)(
-                initial_delta_m
-            )
-            initial_delta_p = tf.expand_dims(
-                self.delta_p_prior.sample(self.n_samples), axis=-1
-            )
-            self.initial_delta_p = ks.layers.RepeatVector(self.nspec_dim)(
-                initial_delta_p
-            )
-            initial_us = self.u_prior.sample(self.n_samples) * 0.0
-            self.initial_us = ks.layers.RepeatVector(self.nspec_dim)(initial_us)
-            initial_latents = self.nflow.pdf.bijector.forward(initial_us)
-            self.initial_latents = ks.layers.RepeatVector(self.nspec_dim)(
-                initial_latents
-            )
+            init_latents = self.nflow.flow.bijector.inverse(init_zs)
         else:
-            pass
-            # initial_us = self.u_prior.sample(self.n_samples) * 0.0
-            # initial_latents = self.nflow.pdf.bijector.forward(initial_us)
-            # delta_av_max = 0.5
-            # delta_av_min = -0.5
-            # d_delta_av = (delta_av_max - delta_av_min) / self.stage.n_chains
-            # delta_av = (
-            #     tf.zeros(self.n_samples) + delta_av_min + self._chain * d_delta_av
-            # )
-            # initial_latents[:, 0] = delta_av
-            # initial_us = self.nflow.pdf.bijector.inverse(initial_latents)
-            # self.initial_us = ks.layers.RepeatVector(self.nspec_dim)(initial_us)
-            # self.initial_latents = ks.layers.RepeatVector(self.nspec_dim)(
-            #     initial_latents
-            # )
-            #
-            # initial_delta_m = tf.expand_dims(
-            #     self.delta_m_prior.sample(self.n_samples) * 0.0, axis=-1
-            # )
-            # self.initial_delta_m = ks.layers.RepeatVector(self.nspec_dim)(
-            #     initial_delta_m
-            # )
-            # initial_delta_p = tf.expand_dims(
-            #     self.delta_p_prior.sample(self.n_samples), axis=-1
-            # )
-            # self.initial_delta_p = ks.layers.RepeatVector(self.nspec_dim)(
-            #     initial_delta_p
-            # )
+            init_latents = tf.zeros((self.batch_dim, self.n_latents))
+            init_zs = self.nflow.flow.bijector.forward(init_latents)
 
-        self.delta_m = tf.Variable(self.initial_delta_m)
-        self.delta_m.assign(self.initial_delta_m)
+        self.curr_zs = init_zs
+        if self.init_zs is None:
+            self.init_zs = self.curr_zs
+        if self.best_zs is None:
+            self.best_zs = self.curr_zs
+        self.curr_latents = init_latents
+        if self.init_latents is None:
+            self.init_latents = self.curr_latents
+        if self.best_latents is None:
+            self.best_latents = self.curr_latents
 
-        self.delta_p = tf.Variable(self.initial_delta_p)
-        self.delta_p.assign(self.initial_delta_p)
+        # --- ΔAᵥ ---
+        if self.stage.init_delta_av == "init":
+            if self.random_initial_positions:
+                self.stage.init_delta_av = "random"
+            else:
+                self.stage.init_delta_av = "data"
+        if self.stage.init_delta_av == "random":
+            init_delta_av = tf.expand_dims(
+                self.delta_av_prior.sample(self.batch_dim), axis=-1
+            )
+        elif self.stage.init_delta_av == "data":
+            init_delta_av = self.init_zs[:, 0]
+        elif self.stage.init_delta_av == "scale":
+            delta_av_slope = (
+                self.delta_av_max - self.delta_av_min
+            ) / self.stage.n_chains
+            delta_av_scale = (
+                self.delta_av_min + (self.stage.n_chains - self._chain) * delta_av_slope
+            )
+            init_delta_av = tf.zeros((self.batch_dim, 1)) + delta_av_scale
+        else:
+            init_delta_av = tf.zeros((self.batch_dim, 1))
+        self.curr_delta_av = init_delta_av
+        if self.init_delta_av is None:
+            self.init_delta_av = self.curr_delta_av
+        if self.best_delta_av is None:
+            self.best_delta_av = self.curr_delta_av
 
-        self.us = self.initial_us
+        # --- Δℳ  ---
+        if self.stage.init_delta_m == "init":
+            if self.random_initial_positions:
+                self.stage.init_delta_m = "random"
+            else:
+                self.stage.init_delta_m = "data"
+        if self.stage.init_delta_m == "random":
+            init_delta_m = tf.expand_dims(
+                self.delta_m_prior.sample(self.batch_dim), axis=-1
+            )
+        elif self.stage.init_delta_m == "data":
+            init_delta_m = self.init_zs[:, self.nflow.pae.n_zs + 1]
+        elif self.stage.init_delta_m == "scale":
+            delta_m_slope = (self.delta_m_max - self.delta_m_min) / self.stage.n_chains
+            delta_m_scale = (
+                self.delta_m_min + (self.stage.n_chains - self._chain) * delta_m_slope
+            )
+            init_delta_m = tf.zeros((self.batch_dim, 1)) + delta_m_scale
+        else:
+            init_delta_m = tf.ones((self.batch_dim, 1))
+        self.curr_delta_m = init_delta_m
+        if self.init_delta_m is None:
+            self.init_delta_m = self.curr_delta_m
+        if self.best_delta_m is None:
+            self.best_delta_m = self.curr_delta_m
 
-        self.latents = self.initial_latents
+        # --- Δ𝓅 ---
+        if self.stage.init_delta_p == "init":
+            if self.random_initial_positions:
+                self.stage.init_delta_p = "random"
+            else:
+                self.stage.init_delta_p = "data"
+        if self.stage.init_delta_p == "random":
+            init_delta_p = tf.expand_dims(
+                self.delta_p_prior.sample(self.batch_dim), axis=-1
+            )
+        elif self.stage.init_delta_p == "data":
+            init_delta_p = self.init_zs[:, self.nflow.pae.n_zs + 2]
+        elif self.stage.init_delta_p == "scale":
+            delta_p_slope = (self.delta_p_pax - self.delta_p_min) / self.stage.n_chains
+            delta_p_scale = (
+                self.delta_p_min + (self.stage.n_chains - self._chain) * delta_p_slope
+            )
+            init_delta_p = tf.zeros((self.batch_dim, 1)) + delta_p_scale
+        else:
+            init_delta_p = tf.zeros((self.batch_dim, 1))
+        self.curr_delta_p = init_delta_p
+        if self.init_delta_p is None:
+            self.init_delta_p = self.curr_delta_p
+        if self.best_delta_p is None:
+            self.best_delta_p = self.curr_delta_p
 
-        self.data = (
-            tf.convert_to_tensor(train_phase, dtype=tf.float32),
-            tf.convert_to_tensor(train_amplitude, dtype=tf.float32),
-            tf.convert_to_tensor(train_d_amplitude, dtype=tf.float32),
-        )
-        self.mask = tf.convert_to_tensor(train_mask, dtype=tf.int32)
-        self.pos = (
-            tf.convert_to_tensor(self.us),
-            tf.convert_to_tensor(self.delta_m),
-            tf.convert_to_tensor(self.delta_p),
-            tf.convert_to_tensor(self.bias),
-        )
+        # --- Bias ---
+        if self.stage.init_bias == "init":
+            if self.random_initial_positions:
+                self.stage.init_bias = "random"
+            else:
+                self.stage.init_bias = "data"
+        if self.stage.init_bias == "random":
+            init_bias = tf.expand_dims(self.bias_prior.sample(self.batch_dim), axis=-1)
+        else:
+            init_bias = tf.zeros((self.batch_dim, 1))
+        self.curr_bias = init_bias
+        if self.init_bias is None:
+            self.init_bias = self.curr_bias
+        if self.best_bias is None:
+            self.best_bias = self.curr_bias
+
+        init_pos = []
+        if self.train_delta_av:
+            init_pos.append(self.curr_delta_av)
+        init_pos.append(self.curr_latents)
+        if self.train_delta_m:
+            init_pos.append(self.curr_delta_m)
+        if self.train_delta_p:
+            init_pos.append(self.curr_delta_p)
+        if self.train_bias:
+            init_pos.append(self.curr_bias)
+        init_position = tf.concat(init_pos, axis=-1)
+        return data, mask, init_position

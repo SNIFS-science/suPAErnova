@@ -6,10 +6,10 @@
         "astropy>=7.0.1",
         "click>=8.1.8",
         "coloredlogs>=15.0.1",
-        "matplotlib>=3.10.0",
         "pandas>=2.2.3",
-        "pydantic>=2.10.6",
-        "sncosmo>=2.12.0",
+        "pydantic>=2.11.3",
+        "sncosmo>=2.12.1",
+        "tensorflow-probability[tf]>=0.25.0",
         "toml>=0.10.2",
         "tqdm>=4.67.1",
     ]
@@ -19,54 +19,51 @@
     requires-python = ">=3.12"
     version = "0.1.0"
 
+    [project.optional-dependencies]
+        tf-cpu   = ["tensorflow-cpu"]
+        tf-cuda  = ["tensorflow"]
+        tf-metal = ["tensorflow-metal"]
+        tf-rocm  = ["tensorflow-rocm; sys_platform == 'linux'"]
+
+        tch-cpu   = []
+        tch-cuda  = []
+        tch-metal = []
+        tch-rocm  = []
+
 [build-system]
     build-backend = "hatchling.build"
     requires      = ["hatchling"]
 
 [dependency-groups]
-    dev = [
-        "jaxtyping>=0.3.1",
-        "pandas-stubs>=2.2.3.241126",
-        "pytest>=8.3.5",
-        "types-tensorflow>=2.18.0.20241227",
-]
-
-    default = [
-        "tensorflow>=2.18.0",
-        "tensorflow-probability>=0.25.0",
-        "tf-keras>=2.18.0",
-    ]
-
-    # 2.17.0 is the latest version available for ROCM 6.3
-    rocm = [
-        "tensorflow-rocm>=2.17.0,<2.18",
-        "tensorflow-probability>=0.24.0,<0.25",
-        "tf-keras>=2.17.0,<2.18",
-    ]
+    dev = []
 
 # === Tools ===
 [tool.uv]
-    conflicts = [[{group = "default"}, {group = "rocm"}]]
-    default-groups = [
-        "dev",
-        "default",
-    ] # Change me to your preferred tensorflow version
-
-    [[tool.uv.dependency-metadata]]
-        name = "tf-keras"
-        requires-dist = [
-        ] # Hack to remove tf-keras tensorflow dependency when using tensorflow-rocm
-        version = "2.17.0"
-
-    [tool.uv.sources]
-        suPAErnova_legacy = {workspace = true}
-        tensorflow-rocm   = {url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.3.2/tensorflow_rocm-2.17.0-cp312-cp312-manylinux_2_28_x86_64.whl"}
+    conflicts = [
+        [
+            {extra = "tf-cpu"},
+            {extra = "tf-cuda"},
+            {extra = "tf-metal"},
+            {extra = "tf-rocm"},
+        ],
+        [
+            {extra = "tch-cpu"},
+            {extra = "tch-cuda"},
+            {extra = "tch-metal"},
+            {extra = "tch-rocm"},
+        ],
+    ]
+    environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+    override-dependencies = ["tensorflow; sys_platform == 'never'"]
 
     [tool.uv.workspace]
         members = ["packages/*"]
 
-[tool.basedpyright]
+    [tool.uv.sources]
+        suPAErnova_legacy = {workspace = true}
+        tensorflow-rocm   = {url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl"}
 
+[tool.basedpyright]
     # Enable all type checks
     typeCheckingMode = "all"
 
@@ -100,7 +97,6 @@
     reportMissingTypeStubs = false
 
 [tool.ruff]
-
     # Enumerate all fixed violations.
     show-fixes = true
 

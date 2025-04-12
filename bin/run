@@ -3,7 +3,7 @@
 function run {
     # --- AMDGPU Env Vars ---
     # Trick ROCm into working
-    # export HSA_OVERRIDE_GFX_VERSION="11.0.0"
+    export HSA_OVERRIDE_GFX_VERSION="11.0.0"
     # Device Selection
     local device="0"
     export HIP_VISIBLE_DEVICES="${device}"
@@ -24,8 +24,19 @@ function run {
     fi
     export TF_XLA_FLAGS
     export XLA_FLAGS
+
+    # TODO: Make Pydantic options
+    # local backend="tch"
+    local backend="tf"
+
+    local hardware="cpu"
+    # local hardware="cuda"
+    # local hardware="metal"
+    # local hardware="rocm"
+
+    local extra="${backend}-${hardware}"
     
-    uv run --no-default-groups --group dev --group rocm python -m suPAErnova $@
+    uv run --extra "${extra}" python -m suPAErnova $@
 }
 
 run $@

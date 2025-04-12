@@ -28,10 +28,29 @@ class PosteriorModelConfig(StepConfig):
     n_chains_mid: PositiveInt = 10
     n_chains_final: PositiveInt = 10
 
+    latents_mean: float = 0.0
+    latents_std: float = 1.0
+
+    train_delta_av: bool = True
+    delta_av_min: float = -1.5
+    delta_av_max: float = 1.5
+    delta_av_mean: float = 0.0
+    delta_av_std: float = 1.0
+
     train_delta_m: bool = True
+    delta_m_min: float = -1.5
+    delta_m_max: float = 1.5
     delta_m_mean: float = 0.0
-    delta_m_std: float = 0.1
+    delta_m_std: float = 1.0
 
     train_delta_p: bool = True
     delta_p_mean: float = 0.0
-    delta_p_std: float = 0.01
+    delta_p_min: float = -1.5
+    delta_p_max: float = 1.5
+    delta_p_std: float = 1.0
+
+    train_bias: bool = True
+    bias_min: float = -1.0
+    bias_max: float = 1.0
+    bias_mean: float = 0.0
+    bias_std: float = 1.0

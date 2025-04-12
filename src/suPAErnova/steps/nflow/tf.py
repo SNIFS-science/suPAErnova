@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .model import NFlowModel
 
     # === Custom Types
-    NFlowInputs = FTensor[S["batch_dim n_latents"]]
+    NFlowInputs = FTensor[S["batch_dim n_flow_latents"]]
     NFlowOutputs = FTensor[S["batch_dim"]]
 
 
@@ -79,18 +79,18 @@ class TFNFlowModel(ks.Model):
         self.data: "NFlowInputs"
 
         # --- Latent Dimensions ---
-        self.n_latents: int = self.pae.n_zs
+        self.n_flow_latents: int = self.pae.n_zs
         if self.physical_latents:
-            self.n_latents += 1
+            self.n_flow_latents += 1
 
         # --- Layers ---
         self.gaussian: tfd.MultivariateNormalDiag = tfd.MultivariateNormalDiag(
-            loc=tf.zeros(self.n_latents),
-            scale_diag=tf.ones(self.n_latents),
+            loc=tf.zeros(self.n_flow_latents),
+            scale_diag=tf.ones(self.n_flow_latents),
         )
 
         permutations = [
-            tf.roll(tf.range(self.n_latents), shift=i, axis=0)
+            tf.roll(tf.range(self.n_flow_latents), shift=i, axis=0)
             for i in range(self.n_layers)
         ]
 
@@ -122,7 +122,7 @@ class TFNFlowModel(ks.Model):
 
         self.bijectors: tfb.Chain = tfb.Chain(bijectors)
 
-        self.pdf: tfd.TransformedDistribution = (
+        self.flow: tfd.TransformedDistribution = (
             tfp.distributions.TransformedDistribution(
                 distribution=self.gaussian, bijector=self.bijectors
             )
@@ -137,7 +137,7 @@ class TFNFlowModel(ks.Model):
     ) -> "NFlowOutputs":
         training = False if training is None else training
 
-        log_prob = self.pdf.log_prob(inputs, training=training)
+        log_prob = self.flow.log_prob(inputs, training=training)
         if TYPE_CHECKING:
             log_prob = cast("FTensor[S['batch_dim']]", log_prob)
 
@@ -188,11 +188,11 @@ class TFNFlowModel(ks.Model):
         )
 
     def get_data(
-        self, latents: "FTensor[S['batch_dim nspec_dim n_latents']]"
-    ) -> "FTensor[S['batch_dim nspec_dim n_latents']]":
+        self, latents: "FTensor[S['batch_dim nspec_dim n_flow_latents']]"
+    ) -> "FTensor[S['batch_dim nspec_dim n_flow_latents']]":
         if self.physical_latents:
             data = latents[:, :, : self.pae.n_zs + 1]
-        elif self.pae.n_physical > 0:
+        elif self.pae.physical_latents:
             data = latents[:, :, 1 : self.pae.n_zs + 1]
         else:
             data = latents

@@ -63,9 +63,10 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
         # --- Config Variables ---
         # Required
+        self.physical_latents: bool
         self.n_physical: int
         self.n_zs: int
-        self.n_latents: int
+        self.n_pae_latents: int
 
         self.seperate_latent_training: bool
         self.seperate_z_latent_training: bool
@@ -116,9 +117,10 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
     ) -> None:
         # --- Config Variables ---
         # Required
+        self.physical_latents = self.options.physical_latents
         self.n_physical = 3 if self.options.physical_latents else 0
         self.n_zs = self.options.n_z_latents
-        self.n_latents = self.n_physical + self.n_zs
+        self.n_pae_latents = self.n_physical + self.n_zs
 
         self.seperate_latent_training = self.options.seperate_latent_training
         self.seperate_z_latent_training = self.options.seperate_z_latent_training
@@ -156,7 +158,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
             "train_data": self.train_data,
             "test_data": self.test_data,
             "val_data": self.val_data,
-            "moving_means": [0 for _ in range(self.n_latents)],
+            "moving_means": [0 for _ in range(self.n_pae_latents)],
             "debug": self.debug,
         }
 
@@ -172,7 +174,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
             **stage_data,
         })
 
-        z0 = 2 if self.n_physical > 0 else 1
+        z0 = 2 if self.physical_latents else 1
         self.stage_zs = [
             Stage.model_validate({
                 "stage": z0 + i,
@@ -213,7 +215,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         })
 
         self.stage_final = Stage.model_validate({
-            "stage": self.n_latents,
+            "stage": self.n_pae_latents,
             "name": "Final",
             "fname": "final",
             "epochs": self.options.final_epochs,
@@ -224,7 +226,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
             **stage_data,
         })
 
-        if self.n_physical > 0:
+        if self.physical_latents:
             self.run_stages = [
                 self.stage_delta_av,
                 *self.stage_zs,

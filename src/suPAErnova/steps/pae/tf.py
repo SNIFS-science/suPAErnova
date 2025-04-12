@@ -52,12 +52,12 @@ if TYPE_CHECKING:
         FTensor[S["batch_dim nspec_dim phase_dim"]],
         FTensor[S["batch_dim nspec_dim wl_dim"]],
     ]
-    EncoderOutputs = FTensor[S["batch_dim nspec_dim n_latents"]]
+    EncoderOutputs = FTensor[S["batch_dim nspec_dim n_pae_latents"]]
 
     # --- Decoder Tensors ---
     DecoderInputsShape = tuple[tuple[int, int, int], tuple[int, int, int]]
     DecoderInputs = tuple[
-        FTensor[S["batch_dim nspec_dim n_latents"]],
+        FTensor[S["batch_dim nspec_dim n_pae_latents"]],
         FTensor[S["batch_dim nspec_dim phase_dim"]],
     ]
     DecoderOutputs = FTensor[S["batch_dim nspec_dim wl_dim"]]
@@ -136,12 +136,12 @@ class TFPAEEncoder(ks.layers.Layer):
         # --- Config Params ---
         n_physical: "Literal[0, 3]" = 3 if options.physical_latents else 0
         n_zs: int = options.n_z_latents
-        self.n_latents: int = n_physical + n_zs
-        self.latents_z_mask: "ITensor[S['n_latents']]"
-        self.latents_physical_mask: "ITensor[S['n_latents']]"
+        self.n_pae_latents: int = n_physical + n_zs
+        self.latents_z_mask: "ITensor[S['n_pae_latents']]"
+        self.latents_physical_mask: "ITensor[S['n_pae_latents']]"
 
         self.stage_num: int
-        self.moving_means: "FTensor[S['n_latents']]"
+        self.moving_means: "FTensor[S['n_pae_latents']]"
 
         self.encode_dims: list[int] = options.encode_dims
 
@@ -183,12 +183,12 @@ class TFPAEEncoder(ks.layers.Layer):
         self.encode_output_layer: TypedLayer[
             ks.layers.Dense,
             "FTensor[S['batch_dim nspec_dim nspec_dim']]",
-            "FTensor[S['batch_dim nspec_dim n_latents']]",
+            "FTensor[S['batch_dim nspec_dim n_pae_latents']]",
         ]
         self.repeat_latent_layer: TypedLayer[
             ks.layers.RepeatVector,
-            "FTensor[S['batch_dim n_latents']]",
-            "FTensor[S['batch_dim nspec_dim n_latents']]",
+            "FTensor[S['batch_dim n_pae_latents']]",
+            "FTensor[S['batch_dim nspec_dim n_pae_latents']]",
         ]
 
     @override
@@ -237,7 +237,7 @@ class TFPAEEncoder(ks.layers.Layer):
         # Encode from nspec_dim dimensions into output (latent) dimensions
         self.encode_output_layer = TypedLayer(
             ks.layers.Dense(
-                self.n_latents,
+                self.n_pae_latents,
                 kernel_regularizer=self.regulariser,
                 use_bias=False,
             )
@@ -289,7 +289,7 @@ class TFPAEEncoder(ks.layers.Layer):
         # First sum latents over all unmasked spectra
         batch_sum = tf.reduce_sum(x * is_kept, axis=-2)
         if TYPE_CHECKING:
-            batch_sum = cast("FTensor[S['batch_dim n_latents']]", batch_sum)
+            batch_sum = cast("FTensor[S['batch_dim n_pae_latents']]", batch_sum)
 
         # Then determine the number of unmasked spectra
         batch_num = tf.maximum(tf.reduce_sum(is_kept, axis=-2), y=1)
@@ -299,7 +299,7 @@ class TFPAEEncoder(ks.layers.Layer):
         # Finally, calculate the average
         latents = batch_sum / batch_num
         if TYPE_CHECKING:
-            latents = cast("FTensor[S['batch_dim n_latents']]", latents)
+            latents = cast("FTensor[S['batch_dim n_pae_latents']]", latents)
 
         if training:
             # Mask latents which aren't being trained
@@ -307,17 +307,17 @@ class TFPAEEncoder(ks.layers.Layer):
             # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅
             # Note that this differs from the order used in the legacy SuPAErnova code:
             # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs
-            masked_latents = tf.zeros(self.n_latents - self.stage_num)
+            masked_latents = tf.zeros(self.n_pae_latents - self.stage_num)
             if TYPE_CHECKING:
                 masked_latents = cast(
-                    "FTensor[S['n_latents-stage_num']]", masked_latents
+                    "FTensor[S['n_pae_latents-stage_num']]", masked_latents
                 )
             unmasked_latents = tf.ones(self.stage_num)
             if TYPE_CHECKING:
                 unmasked_latents = cast("FTensor[S['stage_num']]", unmasked_latents)
             latent_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
             if TYPE_CHECKING:
-                latent_mask = cast("FTensor[S['n_latents']]", latent_mask)
+                latent_mask = cast("FTensor[S['n_pae_latents']]", latent_mask)
             latents *= latent_mask
 
             # Normalise the physical latents within this batch such that they have a mean of 0
@@ -326,19 +326,19 @@ class TFPAEEncoder(ks.layers.Layer):
             latents_mean = self.latents_physical_mask * latents_sum / latents_num
             latents -= latents_mean
             if TYPE_CHECKING:
-                latents_sum = cast("FTensor[S['1 n_latents']]", latents_sum)
-                latents_num = cast("FTensor[S['1 n_latents']]", latents_num)
-                latents_mean = cast("FTensor[S['1 n_latents']]", latents_mean)
+                latents_sum = cast("FTensor[S['1 n_pae_latents']]", latents_sum)
+                latents_num = cast("FTensor[S['1 n_pae_latents']]", latents_num)
+                latents_mean = cast("FTensor[S['1 n_pae_latents']]", latents_mean)
         else:
             # Normalise the physical latents within this batch such that the entire unbatched sample has a mean of 0
             latents -= self.latents_physical_mask * self.moving_means
         if TYPE_CHECKING:
-            latents = cast("FTensor[S['batch_dim n_latents']]", latents)
+            latents = cast("FTensor[S['batch_dim n_pae_latents']]", latents)
 
         # Repeat latent layers across NSpecDim
         encoded = self.repeat_latent_layer(latents)
         if TYPE_CHECKING:
-            encoded = cast("FTensor[S['batch_dim nspec_dim n_latents']]", encoded)
+            encoded = cast("FTensor[S['batch_dim nspec_dim n_pae_latents']]", encoded)
 
         return encoded
 
@@ -349,7 +349,7 @@ class TFPAEEncoder(ks.layers.Layer):
         *,
         training: bool | None = None,
         mask: "TensorCompatible | None" = None,
-    ) -> "FTensor[S['batch_dim nspec_dim n_latents']]":
+    ) -> "FTensor[S['batch_dim nspec_dim n_pae_latents']]":
         training = False if training is None else training
         return super().__call__(inputs, training=training, mask=mask)
 
@@ -361,6 +361,7 @@ class TFPAEDecoder(ks.layers.Layer):
     ) -> None:
         super().__init__(*args, name=f"{name.split()[-1]}Decoder", **kwargs)
         # --- Config Params ---
+        self.physical_latents: bool = options.physical_latents
         self.n_physical: "Literal[0, 3]" = 3 if options.physical_latents else 0
         self.n_zs: int = options.n_z_latents
 
@@ -411,9 +412,10 @@ class TFPAEDecoder(ks.layers.Layer):
 
     @override
     def build(self, input_shape: "DecoderInputsShape") -> None:
-        (_batch_dim, nspec_dim, _n_latents), (_batch_dim, _nspec_dim, _phase_dim) = (
-            input_shape
-        )
+        (
+            (_batch_dim, nspec_dim, _n_pae_latents),
+            (_batch_dim, _nspec_dim, _phase_dim),
+        ) = input_shape
         # Project from input dimensions into nspec_dim dimensions
         self.decode_nspec_layer = TypedLayer(
             ks.layers.Dense(
@@ -464,7 +466,7 @@ class TFPAEDecoder(ks.layers.Layer):
                 if self.colourlaw is None
                 else ks.constraints.NonNeg(),
             )
-            if self.n_physical > 0
+            if self.physical_latents
             else ks.layers.Identity()
         )
 
@@ -486,7 +488,7 @@ class TFPAEDecoder(ks.layers.Layer):
         )
 
         # Extract physical parameters (if applicable)
-        if self.n_physical > 0:
+        if self.physical_latents:
             delta_av_latent = input_latents[:, :, 0:1]
             zs_latent = input_latents[:, :, 1 : self.n_zs + 1]
             delta_m_latent = input_latents[:, :, self.n_zs + 1 : self.n_zs + 2]
@@ -525,7 +527,7 @@ class TFPAEDecoder(ks.layers.Layer):
         amplitude = self.decode_output_layer(x)
 
         # Apply ΔAᵥ / Δℳ  shift
-        if self.n_physical > 0:
+        if self.physical_latents:
             # Calculate Colourlaw
             colourlaw = self.colourlaw_layer(delta_av_latent)
 
@@ -568,9 +570,10 @@ class TFPAEModel(ks.Model):
         self.force: bool = config.config.force
 
         # --- Latent Dimensions ---
+        self.physical_latents: bool = options.physical_latents
         self.n_physical: "Literal[0, 3]" = 3 if options.physical_latents else 0
         self.n_zs: int = options.n_z_latents
-        self.n_latents: int = self.n_physical + self.n_zs
+        self.n_pae_latents: int = self.n_physical + self.n_zs
 
         # --- Layers ---
         self.encoder: TFPAEEncoder = TFPAEEncoder(options, config.name)
@@ -598,8 +601,8 @@ class TFPAEModel(ks.Model):
         self._loss: ks.losses.Loss = options.loss_cls()
 
         self.stage: Stage
-        self.latents_z_mask: "ITensor[S['n_latents']]"
-        self.latents_physical_mask: "ITensor[S['n_latents']]"
+        self.latents_z_mask: "ITensor[S['n_pae_latents']]"
+        self.latents_physical_mask: "ITensor[S['n_pae_latents']]"
 
         # --- Loss ---
         self._loss_terms: dict[str, "FTensor[S['']]"]
@@ -641,7 +644,7 @@ class TFPAEModel(ks.Model):
         ]
         if self.loss_residual_penalty > 0:
             metrics.append(self.resid_loss_tracker)
-        if self.n_physical > 0 and self.loss_physical_penalty > 0:
+        if self.physical_latents and self.loss_physical_penalty > 0:
             metrics.append(self.delta_loss_tracker)
         if self.loss_covariance_penalty > 0:
             metrics.append(self.cov_loss_tracker)
@@ -659,7 +662,7 @@ class TFPAEModel(ks.Model):
         input_phase = inputs[0]
         encoded = self.encoder(inputs, training=training, mask=mask)
         if TYPE_CHECKING:
-            encoded = cast("FTensor[S['batch_dim nspec_dim n_latents']]", encoded)
+            encoded = cast("FTensor[S['batch_dim nspec_dim n_pae_latents']]", encoded)
 
         decoded = self.decoder((encoded, input_phase), training=training, mask=mask)
         if TYPE_CHECKING:
@@ -674,7 +677,7 @@ class TFPAEModel(ks.Model):
         *,
         training: bool | None = None,
         mask: "TensorCompatible | None" = None,
-    ) -> "tuple[FTensor[S['batch_dim nspec_dim n_latents']], FTensor[S['batch_dim nspec_dim wl_dim']]]":
+    ) -> "tuple[FTensor[S['batch_dim nspec_dim n_pae_latents']], FTensor[S['batch_dim nspec_dim wl_dim']]]":
         training = False if training is None else training
         return super().__call__(inputs, training=training, mask=mask)
 
@@ -704,7 +707,7 @@ class TFPAEModel(ks.Model):
         )
 
         if TYPE_CHECKING:
-            latents = cast("FTensor[S['batch_dim nspec_dim n_latents']]", latents)
+            latents = cast("FTensor[S['batch_dim nspec_dim n_pae_latents']]", latents)
             input_amp = cast("FTensor[S['batch_dim nspec_dim wl_dim']]", input_amp)
             output_amp = cast("FTensor[S['batch_dim nspec_dim wl_dim']]", output_amp)
             input_mask = cast("ITensor[S['batch_dim nspec_dim wl_dim']]", input_mask)
@@ -731,7 +734,7 @@ class TFPAEModel(ks.Model):
             loss_terms[self.resid_loss_tracker.name] = residual_penalty
 
         # Penalise phyical latents which are far from unity (one for multiplicative, zero for additive)
-        if self.n_physical > 0 and self.loss_physical_penalty > 0:
+        if self.physical_latents and self.loss_physical_penalty > 0:
             latents_penalty_scale = tf.concat(
                 (
                     tf.constant((self.loss_delta_av_penalty,)),
@@ -850,7 +853,9 @@ class TFPAEModel(ks.Model):
                 (phase, amplitude), training=training, mask=mask
             )
             if TYPE_CHECKING:
-                latents = cast("FTensor[S['batch_dim nspec_dim n_latents']]", latents)
+                latents = cast(
+                    "FTensor[S['batch_dim nspec_dim n_pae_latents']]", latents
+                )
                 pred_amplitude = cast(
                     "FTensor[S['batch_dim nspec_dim wl_dim']]", pred_amplitude
                 )
@@ -935,7 +940,7 @@ class TFPAEModel(ks.Model):
     def build_model(self) -> None:
         if not self.built:
             # Mask tensors to select specific latents
-            if self.n_physical > 0:
+            if self.physical_latents:
                 self.latents_z_mask = tf.concat(
                     (tf.zeros(1), tf.ones(self.n_zs), tf.zeros(1), tf.zeros(1)), axis=0
                 )
@@ -983,21 +988,21 @@ class TFPAEModel(ks.Model):
 
     def save_checkpoint(self, savepath: "Path") -> None:
         # Normalise mean of physical latents to 0 across all batches
-        if self.n_physical > 0:
+        if self.physical_latents:
             phase = tf.convert_to_tensor(self.stage.train_data.phase)
             amplitude = tf.convert_to_tensor(self.stage.train_data.amplitude)
             mask = tf.convert_to_tensor(self.stage.train_data.mask)
             encoded = self.encoder((phase, amplitude), training=False, mask=mask)
             if TYPE_CHECKING:
-                encoded = cast("FTensor[S['n_sn nspec_dim n_latents']]", encoded)
+                encoded = cast("FTensor[S['n_sn nspec_dim n_pae_latents']]", encoded)
 
             latents_sum = tf.reduce_sum(encoded, axis=(0, 1))
             latents_num = tf.reduce_sum(tf.ones_like(encoded), axis=(0, 1))
             moving_means = latents_sum / latents_num
             if TYPE_CHECKING:
-                latents_sum = cast("FTensor[S['n_latents']]", latents_sum)
-                latents_num = cast("FTensor[S['n_latents']]", latents_num)
-                moving_means = cast("FTensor[S['n_latents']]", moving_means)
+                latents_sum = cast("FTensor[S['n_pae_latents']]", latents_sum)
+                latents_num = cast("FTensor[S['n_pae_latents']]", latents_num)
+                moving_means = cast("FTensor[S['n_pae_latents']]", moving_means)
             self.encoder.moving_means = moving_means
         self.save_weights(savepath / self.weights_path)
         self.save(savepath / self.model_path)
@@ -1007,7 +1012,7 @@ class TFPAEModel(ks.Model):
     ) -> None:
         self.build_model()
         reset_weights = (
-            (self.stage.stage < self.n_latents)
+            (self.stage.stage < self.n_pae_latents)
             if reset_weights is None
             else reset_weights
         )
