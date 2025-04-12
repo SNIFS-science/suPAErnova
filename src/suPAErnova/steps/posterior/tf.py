@@ -80,6 +80,7 @@ class TFPosteriorModel(ks.Model):
         )
 
         # --- Training ---
+        self.trained: bool = False
         self.built: bool = False
         self._chain: int = 0
         self.save_best: bool = options.save_best
@@ -113,19 +114,19 @@ class TFPosteriorModel(ks.Model):
         self.curr_bias: "FTensor[S['batch_dim 1']]"
 
         # Best values
-        self.best_zs: "FTensor[S['batch_dim n_zs']] | None" = None
-        self.best_latents: "FTensor[S['batch_dim n_latents']] | None" = None
-        self.best_delta_av: "FTensor[S['batch_dim 1']] | None" = None
-        self.best_delta_m: "FTensor[S['batch_dim 1']] | None" = None
-        self.best_delta_p: "FTensor[S['batch_dim 1']] | None" = None
-        self.best_bias: "FTensor[S['batch_dim 1']] | None" = None
+        self.best_zs: tf.Variable
+        self.best_latents: tf.Variable
+        self.best_delta_av: tf.Variable
+        self.best_delta_m: tf.Variable
+        self.best_delta_p: tf.Variable
+        self.best_bias: tf.Variable
 
         # --- Layers ---
         self.latents_mean: float = options.latents_mean
         self.latents_std: float = options.latents_std
         self.latents_prior: tfd.MultivariateNormalDiag = tfd.MultivariateNormalDiag(
             loc=self.latents_mean * tf.ones(self.n_latents),
-            scale_diag=self.latents_mean * tf.ones(self.n_latents),
+            scale_diag=self.latents_std * tf.ones(self.n_latents),
         )
 
         self.train_delta_av: bool = options.train_delta_av
@@ -164,10 +165,10 @@ class TFPosteriorModel(ks.Model):
             loc=self.bias_mean, scale=self.bias_std
         )
 
-        self.best_chain: tf.Tensor
-        self.best_converged: tf.Tensor
-        self.best_objective_value: tf.Tensor
-        self.num_evals: int
+        self.best_chain: tf.Variable
+        self.best_converged: tf.Variable
+        self.best_objective_value: tf.Variable
+        self.num_evals: tf.Variable
 
         self.u_likelihood: tfd.Independent
 
@@ -365,24 +366,37 @@ class TFPosteriorModel(ks.Model):
         else:
             bias = self.curr_bias
 
-        improved = self.results.objective_value < self.best_objective_value
-        self.best_objective_value = tf.where(
-            improved, self.results.objective_value, self.best_objective_value
+        improved = (
+            tf.expand_dims(self.results.objective_value, axis=-1)
+            < self.best_objective_value
         )
-        self.best_chain = tf.where(
-            improved, self._chain * tf.ones_like(self.best_chain), self.best_chain
+        self.best_objective_value.assign(
+            tf.where(
+                improved,
+                tf.expand_dims(self.results.objective_value, axis=-1),
+                self.best_objective_value,
+            )
         )
-        self.best_converged = tf.where(
-            improved, self.results.converged, self.best_converged
+        self.best_chain.assign(
+            tf.where(
+                improved, self._chain * tf.ones_like(self.best_chain), self.best_chain
+            )
         )
-        self.num_evals += self.results.num_objective_evaluations
+        self.best_converged.assign(
+            tf.where(
+                improved,
+                tf.expand_dims(self.results.converged, axis=-1),
+                self.best_converged,
+            )
+        )
+        self.num_evals.assign(self.num_evals + self.results.num_objective_evaluations)
 
-        self.best_zs = tf.where(improved, zs, self.best_zs)
-        self.best_latents = tf.where(improved, latents, self.best_latents)
-        self.best_delta_av = tf.where(improved, delta_av, self.best_delta_av)
-        self.best_delta_m = tf.where(improved, delta_m, self.best_delta_m)
-        self.best_delta_p = tf.where(improved, delta_p, self.best_delta_p)
-        self.best_bias = tf.where(improved, bias, self.best_bias)
+        self.best_zs.assign(tf.where(improved, zs, self.best_zs))
+        self.best_latents.assign(tf.where(improved, latents, self.best_latents))
+        self.best_delta_av.assign(tf.where(improved, delta_av, self.best_delta_av))
+        self.best_delta_m.assign(tf.where(improved, delta_m, self.best_delta_m))
+        self.best_delta_p.assign(tf.where(improved, delta_p, self.best_delta_p))
+        self.best_bias.assign(tf.where(improved, bias, self.best_bias))
 
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
@@ -446,11 +460,6 @@ class TFPosteriorModel(ks.Model):
             self.batch_dim = train_phase.shape[0]
             self.nspec_dim = train_phase.shape[1]
 
-            self.best_objective_value = np.inf * tf.ones((self.batch_dim, 1))
-            self.best_chain = tf.zeros((self.batch_dim, 1))
-            self.best_converged = tf.cast(tf.zeros((self.batch_dim, 1)), tf.bool)
-            self.num_evals = 0
-
             self.recon_error, _recon_error_edges, self.recon_error_centers = (
                 self.nflow.pae.recon_error((
                     tf.convert_to_tensor(train_phase, dtype=tf.float32),
@@ -479,12 +488,37 @@ class TFPosteriorModel(ks.Model):
             self.summary(print_fn=self.log.debug)  # Will show number of parameters
 
             self.built = True
+        if not self.trained:
+            self.best_zs = tf.Variable(
+                self.init_zs,
+                trainable=False,
+            )
+            self.best_latents = tf.Variable(
+                self.init_latents,
+                trainable=False,
+            )
+            self.best_delta_av = tf.Variable(self.init_delta_av, trainable=False)
+            self.best_delta_m = tf.Variable(self.init_delta_m, trainable=False)
+            self.best_delta_p = tf.Variable(self.init_delta_p, trainable=False)
+            self.best_bias = tf.Variable(self.init_bias, trainable=False)
+            self.best_objective_value = tf.Variable(
+                np.inf * tf.ones((self.batch_dim, 1)), trainable=False
+            )
+            self.best_chain = tf.Variable(
+                tf.zeros((self.batch_dim, 1)), trainable=False
+            )
+            self.best_converged = tf.Variable(
+                tf.cast(tf.zeros((self.batch_dim, 1)), tf.bool), trainable=False
+            )
+            self.num_evals = tf.Variable(0, trainable=False)
+            self.trained = True
 
     def save_checkpoint(self, savepath: "Path") -> None:
         self.save_weights(savepath / self.weights_path)
         self.save(savepath / self.model_path)
 
     def load_checkpoint(self, loadpath: "Path") -> None:
+        self.trained = True
         self.build_model()
         self.load_weights(loadpath / self.weights_path)
 
@@ -523,13 +557,9 @@ class TFPosteriorModel(ks.Model):
         self.curr_zs = init_zs
         if self.init_zs is None:
             self.init_zs = self.curr_zs
-        if self.best_zs is None:
-            self.best_zs = self.curr_zs
         self.curr_latents = init_latents
         if self.init_latents is None:
             self.init_latents = self.curr_latents
-        if self.best_latents is None:
-            self.best_latents = self.curr_latents
 
         # --- ΔAᵥ ---
         if self.stage.init_delta_av == "init":
@@ -556,8 +586,6 @@ class TFPosteriorModel(ks.Model):
         self.curr_delta_av = init_delta_av
         if self.init_delta_av is None:
             self.init_delta_av = self.curr_delta_av
-        if self.best_delta_av is None:
-            self.best_delta_av = self.curr_delta_av
 
         # --- Δℳ  ---
         if self.stage.init_delta_m == "init":
@@ -582,8 +610,6 @@ class TFPosteriorModel(ks.Model):
         self.curr_delta_m = init_delta_m
         if self.init_delta_m is None:
             self.init_delta_m = self.curr_delta_m
-        if self.best_delta_m is None:
-            self.best_delta_m = self.curr_delta_m
 
         # --- Δ𝓅 ---
         if self.stage.init_delta_p == "init":
@@ -608,8 +634,6 @@ class TFPosteriorModel(ks.Model):
         self.curr_delta_p = init_delta_p
         if self.init_delta_p is None:
             self.init_delta_p = self.curr_delta_p
-        if self.best_delta_p is None:
-            self.best_delta_p = self.curr_delta_p
 
         # --- Bias ---
         if self.stage.init_bias == "init":
@@ -624,8 +648,6 @@ class TFPosteriorModel(ks.Model):
         self.curr_bias = init_bias
         if self.init_bias is None:
             self.init_bias = self.curr_bias
-        if self.best_bias is None:
-            self.best_bias = self.curr_bias
 
         init_pos = []
         if self.train_delta_av:

@@ -42,6 +42,16 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         # --- Previous Step Variables ---
         self.pae: PAEModel[PAE, PAEConfig]
 
+    def prep_model(self, *, force: bool = False) -> M:
+        if not force:
+            try:
+                return self.model
+            except AttributeError:
+                pass
+        model_cls = get_args(self.__orig_class__)[0]
+        self.model = model_cls(self)
+        return self.model
+
     @override
     def _setup(
         self,
@@ -53,14 +63,12 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.pae = pae
         self.pae.load()
 
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
         self.savepath = self.paths.out / self.model.name
 
     @override
     def _completed(self) -> bool:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
         savepath = self.savepath / self.model.model_path
 
         if not savepath.exists():
@@ -72,17 +80,14 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _load(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
 
         self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
         self.model.load_checkpoint(self.savepath)
 
     @override
     def _run(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
-
+        self.prep_model()
         model_path = self.savepath / self.model.model_path
         weights_path = self.savepath / self.model.weights_path
         if model_path.exists() and not self.force:
@@ -95,9 +100,7 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _result(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
-
+        self.prep_model()
         self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
         self.model.save_checkpoint(self.savepath)
 

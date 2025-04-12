@@ -82,6 +82,16 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.stage_final: Stage
         self.run_stages: list[Stage]
 
+    def prep_model(self, *, force: bool = False) -> M:
+        if not force:
+            try:
+                return self.model
+            except AttributeError:
+                pass
+        model_cls = get_args(self.__orig_class__)[0]
+        self.model = model_cls(self)
+        return self.model
+
     @override
     def _setup(
         self,
@@ -103,8 +113,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.test_data = self.nflow.pae.test_data
         self.val_data = self.nflow.pae.val_data
 
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
         self.savepath = self.paths.out / self.model.name
 
         # --- Stages ---
@@ -171,8 +180,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _completed(self) -> bool:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -187,8 +195,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _load(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -199,9 +206,8 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _run(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
+        self.prep_model()
         savepath: Path | None = None
-        self.model = model_cls(self)
         for i, stage in enumerate(self.run_stages):
             self.log.debug(f"Starting Stage {i}: {stage.name}")
             if savepath is not None:
@@ -222,8 +228,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _result(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -234,7 +239,20 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _analyse(self) -> None:
-        pass
+        print(self.model.built, self.model.trained)
+        self.prep_model()
+        print(
+            self.model.best_zs,
+            self.model.best_latents,
+            self.model.best_delta_av,
+            self.model.best_delta_m,
+            self.model.best_delta_p,
+            self.model.best_bias,
+            self.model.best_chain,
+            self.model.best_converged,
+            self.model.best_objective_value,
+            self.model.num_evals,
+        )
 
     #
     # === Posterior Specific Functions ===

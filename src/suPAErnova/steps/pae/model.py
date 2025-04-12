@@ -106,6 +106,16 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.stage_final: Stage
         self.run_stages: list[Stage]
 
+    def prep_model(self, *, force: bool = False) -> M:
+        if not force:
+            try:
+                return self.model
+            except AttributeError:
+                pass
+        model_cls = get_args(self.__orig_class__)[0]
+        self.model = model_cls(self)
+        return self.model
+
     @override
     def _setup(
         self,
@@ -239,8 +249,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _completed(self) -> bool:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
         final_stage = self.run_stages[-1]
         final_savepath = (
             self.paths.out / self.model.name / final_stage.fname / self.model.model_path
@@ -255,8 +264,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _load(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
+        self.prep_model()
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -267,10 +275,9 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _run(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
         savepath: Path | None = None
         for i, stage in enumerate(self.run_stages):
-            self.model = model_cls(self)
+            self.prep_model(force=True)
             self.log.debug(f"Starting Stage {i}: {stage.name}")
             if savepath is not None:
                 stage.loadpath = savepath
@@ -290,9 +297,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _result(self) -> None:
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
-
+        self.prep_model()
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
         final_savepath = self.paths.out / self.model.name / final_stage.fname
