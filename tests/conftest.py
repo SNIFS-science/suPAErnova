@@ -12,7 +12,10 @@ if TYPE_CHECKING:
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-pytest_plugins = ["tests.test_parity.fixtures.data_step"]
+pytest_plugins = [
+    "tests.test_parity.fixtures.data_step",
+    "tests.test_parity.fixtures.pae_step",
+]
 
 
 @pytest.fixture(scope="session")

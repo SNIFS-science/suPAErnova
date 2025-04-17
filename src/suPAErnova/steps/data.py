@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, cast, override
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +13,7 @@ from suPAErnova.configs.steps.data import DataStepConfig
 from .steps import SNPAEStep
 
 if TYPE_CHECKING:
+    from typing import Any
     from logging import Logger
     from collections.abc import Iterable, Sequence
 
@@ -28,27 +29,27 @@ WL_MASK_MAX = 9701.23
 class SNPAEData(BaseModel):
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
 
-    ind: npt.NDArray[np.int32]
-    nspectra: npt.NDArray[np.int32]
-    sn_name: npt.NDArray[np.str_]
-    dphase: npt.NDArray[np.float32]
-    redshift: npt.NDArray[np.float32]
-    x0: npt.NDArray[np.float32]
-    x1: npt.NDArray[np.float32]
-    c: npt.NDArray[np.float32]
-    MB: npt.NDArray[np.float32]
-    hubble_residual: npt.NDArray[np.float32]
-    luminosity_distance: npt.NDArray[np.float32]
-    spectra_id: npt.NDArray[np.str_]
-    phase: npt.NDArray[np.float32]
-    wl_mask_min: npt.NDArray[np.float32]
-    wl_mask_max: npt.NDArray[np.float32]
-    amplitude: npt.NDArray[np.float32]
-    sigma: npt.NDArray[np.float32]
-    salt_flux: npt.NDArray[np.float32]
-    wavelength: npt.NDArray[np.float32]
-    mask: npt.NDArray[np.int32]
-    time: npt.NDArray[np.float32]
+    ind: "npt.NDArray[np.int32]"
+    nspectra: "npt.NDArray[np.int32]"
+    sn_name: "npt.NDArray[np.str_]"
+    dphase: "npt.NDArray[np.float32]"
+    redshift: "npt.NDArray[np.float32]"
+    x0: "npt.NDArray[np.float32]"
+    x1: "npt.NDArray[np.float32]"
+    c: "npt.NDArray[np.float32]"
+    MB: "npt.NDArray[np.float32]"
+    hubble_residual: "npt.NDArray[np.float32]"
+    luminosity_distance: "npt.NDArray[np.float32]"
+    spectra_id: "npt.NDArray[np.str_]"
+    phase: "npt.NDArray[np.float32]"
+    wl_mask_min: "npt.NDArray[np.float32]"
+    wl_mask_max: "npt.NDArray[np.float32]"
+    amplitude: "npt.NDArray[np.float32]"
+    sigma: "npt.NDArray[np.float32]"
+    salt_flux: "npt.NDArray[np.float32]"
+    wavelength: "npt.NDArray[np.float32]"
+    mask: "npt.NDArray[np.int32]"
+    time: "npt.NDArray[np.float32]"
 
 
 class DataStep(SNPAEStep[DataStepConfig]):
@@ -391,14 +392,14 @@ class DataStep(SNPAEStep[DataStepConfig]):
         self.log.debug("Calculating SALT fluxes")
 
         def get_salt_flux(
-            wavelength: npt.NDArray[np.float32],
+            wavelength: "npt.NDArray[np.float32]",
             tobs: float = 0.0,
             z: float = 0.0,
             x0: float = 1.0,
             x1: float = 0.0,
             c: float = 0.0,
             zref: float = 0.05,
-        ) -> npt.NDArray[np.float32]:
+        ) -> "npt.NDArray[np.float32]":
             self.salt_model.set(x0=x0, x1=x1, c=c)
             return (
                 self.salt_model.flux(phase=tobs, wave=wavelength)
@@ -463,8 +464,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
         # Create an array of shape sn_dim by nspec_dim, padding if needed
         def pad[T: np.generic](
             arr: "Iterable[Sequence[T | npt.NDArray[T]]]",
-            padding: T | npt.NDArray[T],
-        ) -> npt.NDArray[T]:
+            padding: "T | npt.NDArray[T]",
+        ) -> "npt.NDArray[T]":
             if isinstance(padding, np.ndarray):
                 padded_arr: npt.NDArray[T] = np.full(
                     (self.sn_dim, self.nspec_dim, *padding.shape),
@@ -479,7 +480,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
 
         # Given a list of value-per-row of length sn_dim
         # Fill each row with nspec_dim repeats of that row's value
-        def fill_rows[T: np.generic](values: npt.NDArray[T]) -> npt.NDArray[T]:
+        def fill_rows[T: np.generic](values: "npt.NDArray[T]") -> "npt.NDArray[T]":
             return np.repeat(values, phase_axis).reshape((self.sn_dim, self.nspec_dim))
 
         # Index of each SNe
@@ -549,77 +550,83 @@ class DataStep(SNPAEStep[DataStepConfig]):
             if len(v.shape) == 2:
                 data[k] = v[..., np.newaxis]
 
+        def nearest_mask[T: np.number[Any]](
+            arr: "npt.NDArray[T]",
+            min_val: "T | npt.NDArray[T]",
+            max_val: "T | npt.NDArray[T]",
+        ) -> "npt.NDArray[np.bool_]":
+            if not isinstance(min_val, np.ndarray):
+                min_val = cast("npt.NDArray[T]", np.array(min_val))
+            if not isinstance(max_val, np.ndarray):
+                max_val = cast("npt.NDArray[T]", np.array(max_val))
+            base_mask = (min_val <= arr) & (arr <= max_val)
+
+            # Pad left and right
+            pad_left = np.pad(
+                base_mask[:, :, :-1],
+                ((0, 0), (0, 0), (1, 0)),
+                mode="constant",
+                constant_values=False,
+            )
+            pad_right = np.pad(
+                base_mask[:, :, 1:],
+                ((0, 0), (0, 0), (0, 1)),
+                mode="constant",
+                constant_values=False,
+            )
+
+            # Compute distances to the boundaries
+            dist_to_min = np.abs(arr - min_val)
+            dist_to_max = np.abs(arr - max_val)
+
+            # Left edge logic
+            expand_left = (
+                (~base_mask) & pad_right & (dist_to_min < np.roll(dist_to_min, -1))
+            )
+            # Right edge logic
+            expand_right = (
+                (~base_mask) & pad_left & (dist_to_max < np.roll(dist_to_max, 1))
+            )
+            # Combine the masks
+            return base_mask | expand_left | expand_right
+
         # Create a mask of wavelength outside of the wavelength limits
         data["mask"] = np.full(
             (self.sn_dim, self.nspec_dim, self.wl_dim), fill_value=False
         )
 
-        base_wl_mask = (data["wl_mask_min"] <= data["wavelength"]) & (
-            data["wavelength"] <= data["wl_mask_max"]
+        valid_wavelength_mask = nearest_mask(
+            data["wavelength"], data["wl_mask_min"], data["wl_mask_max"]
         )
-
-        # Pad left and right
-        pad_left = np.pad(
-            base_wl_mask[:, :, :-1],
-            ((0, 0), (0, 0), (1, 0)),
-            mode="constant",
-            constant_values=False,
-        )
-        pad_right = np.pad(
-            base_wl_mask[:, :, 1:],
-            ((0, 0), (0, 0), (0, 1)),
-            mode="constant",
-            constant_values=False,
-        )
-
-        # Compute distances to the boundaries
-        dist_to_min = np.abs(data["wavelength"] - data["wl_mask_min"])
-        dist_to_max = np.abs(data["wavelength"] - data["wl_mask_max"])
-
-        # Left edge logic
-        expand_left = (
-            (~base_wl_mask) & pad_right & (dist_to_min < np.roll(dist_to_min, -1))
-        )
-        # Right edge logic
-        expand_right = (
-            (~base_wl_mask) & pad_left & (dist_to_max < np.roll(dist_to_max, 1))
-        )
-
-        # Combine the masks
-        valid_wavelengths = base_wl_mask | expand_left | expand_right
-
-        data["mask"][valid_wavelengths] = True
+        data["mask"][valid_wavelength_mask] = True
 
         # Mask any huge laser lines, Na D (5674 - 5692A)
         # TODO: Make these options
         # these are large jumps in flux, localized over a few wavelength bins
-        wavelength_bin_start = 5000.0
-        wavelength_bin_end = 8000.0
+        laser_wl_start = np.float32(5000.0)
+        laser_wl_end = np.float32(8000.0)
         laser_width = 2  # in units of wavelength bins
         laser_height = 0.4  # fractional increase in amplitude over neighbours to be considered laser
 
-        wave_mask = (wavelength_bin_start <= data["wavelength"]) & (
-            data["wavelength"] <= wavelength_bin_end
+        laser_wl_mask = nearest_mask(data["wavelength"], laser_wl_start, laser_wl_end)
+        laser_amp = np.full(data["amplitude"].shape, np.nan)
+        laser_amp[laser_wl_mask] = data["amplitude"][laser_wl_mask]
+
+        laser_amp_min = np.roll(laser_amp, (0, 0, -laser_width))
+        laser_amp_max = np.roll(laser_amp, (0, 0, laser_width))
+
+        laser_amp_smooth = (
+            0.5 * (laser_amp_min + laser_amp_max) * laser_wl_mask.astype(np.float32)
         )
-        amplitude = np.zeros(data["amplitude"].shape)
-        amplitude[wave_mask] = data["amplitude"][wave_mask]
+        laser_mask = (laser_amp - laser_amp_smooth) > laser_height
 
-        wave_mask_min = (wavelength_bin_start - laser_width <= data["wavelength"]) & (
-            data["wavelength"] <= wavelength_bin_end - laser_width
-        )
-        min_amplitude = np.zeros(data["amplitude"].shape)
-        min_amplitude[wave_mask] = data["amplitude"][wave_mask_min]
+        while laser_width > 0:
+            laser_mask_min = np.roll(laser_mask, (0, 0, -1))
+            laser_mask_max = np.roll(laser_mask, (0, 0, 1))
+            laser_mask = laser_mask | laser_mask_min | laser_mask_max
+            laser_width -= 1
 
-        wave_mask_max = (wavelength_bin_start + laser_width <= data["wavelength"]) & (
-            data["wavelength"] <= wavelength_bin_end + laser_width
-        )
-        max_amplitude = np.zeros(data["amplitude"].shape)
-        max_amplitude[wave_mask] = data["amplitude"][wave_mask_max]
-
-        smooth_amplitude = 0.5 * (min_amplitude + max_amplitude)
-
-        laser_mask = (amplitude - smooth_amplitude) > laser_height
-        # data["mask"] &= ~laser_mask
+        data["mask"] &= ~laser_mask
 
         # --- Finalise Data ---
         # Rescale phase to time such that:

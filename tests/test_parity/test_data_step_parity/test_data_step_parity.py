@@ -47,7 +47,7 @@ def test_setup(data: "SNPAEData", data_legacy: "SNPAEData") -> None:
 
 
 @pytest.mark.parametrize("key", KEYS)
-def test_shapes(key: str, data: "SNPAEData", data_legacy: "SNPAEData") -> None:
+def test_shapes(key: str, data: "Data", data_legacy: "SNPAEData") -> None:
     shape = getattr(data, key).shape
     shape_legacy = getattr(data_legacy, key).shape
     assert shape == shape_legacy, (

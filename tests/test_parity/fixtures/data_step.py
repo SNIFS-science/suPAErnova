@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 
     from _pytest.fixtures import SubRequest
 
+    from suPAErnova.steps.data import DataStep
+
 MIN_PHASES = (-10,)
 MAX_PHASES = (40,)
 PHASES = zip(MIN_PHASES, MAX_PHASES, strict=True)
@@ -313,7 +315,9 @@ def data_step_dict_legacy(
                 # Variation: In the legacy code, valid maximum wavelength where masked as ind_keep_min:ind_keep_max results in an array that does not include ind_keep_max
                 data_out["mask"][i, ispec, ind_keep_min : ind_keep_max + 1] = True
             wavelength_bin_start = find_nearest_idx(data["wavelengths"], 5000.0)
-            wavelength_bin_end = find_nearest_idx(data["wavelengths"], 8000.0)
+
+            # Variation: In the legacy code, some wavelengths where ignored as wavelength_bin_start:wavelength_bin_end results in an array that does not include wavelength_bin_end
+            wavelength_bin_end = find_nearest_idx(data["wavelengths"], 8000.0) + 1
             laser_width = 2
             laser_height = 0.4
             speci = data_out["spectra"][
@@ -336,15 +340,21 @@ def data_step_dict_legacy(
                 ]
             ) / 2
             laser_mask = (speci - speci_smooth) > laser_height
+
+            # Variation: i->ii. Doesn't change the code since python can keep track of list-comprehension vs non list-comprehension variables, but avoids confusion
+            # Variation: In the legacy code, invalid wavelengths where unmasked as ii-laser_width:ii+laser_width results in an array that does not include ii+laser_width
             laser_mask = np.array([
-                np.any(laser_mask[i - laser_width : i + laser_width])
-                for i in range(laser_mask.shape[0])
+                np.any(laser_mask[ii - laser_width : ii + laser_width + 1])
+                for ii in range(laser_mask.shape[0])
             ])
-            # data_out["mask"][
-            #     i,
-            #     ispec,
-            #     wavelength_bin_start:wavelength_bin_end,
-            # ] = ~laser_mask
+
+            # Variation: Legacy code originally overwrote the mask rather than &-ing the laser_mask with the mask, meaning non-laser points were unmasked even if they were originally masked to begin with.
+            data_out["mask"][
+                i,
+                ispec,
+                wavelength_bin_start:wavelength_bin_end,
+            ] &= ~laser_mask
+
         data_out["times"][i, :n_speci] = data["phase"][ids[:n_timestep], None]
     data_out["mask"] = data_out["mask"].astype(np.float32)
     data.pop("wavelengths")
@@ -446,7 +456,7 @@ def data_legacy(data_step_dict_legacy: dict[str, "Any"]) -> "SNPAEData":
 
 
 @pytest.fixture(params=PARAMS, scope="session")
-def data(
+def datastep(
     request: "SubRequest",
     root_path: "Path",
     data_path: "Path",
@@ -454,7 +464,7 @@ def data(
     verbosity: int,
     *,
     force: bool,
-) -> "SNPAEData":
+) -> "DataStep":
     ((min_phase, max_phase), (_min_redshift, _max_redshift), train_frac, seed) = (
         request.param
     )
@@ -479,6 +489,11 @@ def data(
         out_path=cache_path / "suPAErnova" / str(request.param_index),
     )
     input.run()
-    data = input.data_step
-    assert data is not None, "Error running DataStep"
-    return data.data
+    datastep = input.data_step
+    assert datastep is not None, "Error running DataStep"
+    return datastep
+
+
+@pytest.fixture(scope="session")
+def data(datastep: "DataStep") -> "SNPAEData":
+    return datastep.data
