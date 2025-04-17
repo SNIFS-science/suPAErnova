@@ -1,5 +1,6 @@
 # Example output
 /examples/**/output/
+/tests/**/output/
 
 # Old source code
 /src/old_suPAErnova/
@@ -56,6 +57,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+tests/cache/
 
 # Translations
 *.mo
