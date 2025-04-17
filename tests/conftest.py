@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
+pytest_plugins = ["tests.test_parity.fixtures.data_step"]
+
 
 @pytest.fixture(scope="session")
 def root_path() -> Path:
