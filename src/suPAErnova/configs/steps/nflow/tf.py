@@ -1,4 +1,4 @@
-from typing import override
+from typing import cast, override
 from functools import cached_property
 
 from pydantic import computed_field
@@ -31,7 +31,7 @@ class TFNFlowModelConfig(NFlowModelConfig):
     @computed_field
     @cached_property
     def optimiser_cls(self) -> type[ks.optimizers.Optimizer]:
-        return validate_optimiser(self.optimiser)
+        return cast("ks.optimizers.Optimizer", validate_optimiser(self.optimiser))
 
     loss: ConfigInputObject[LossObject] | None = None
 

@@ -35,7 +35,10 @@
     requires      = ["hatchling"]
 
 [dependency-groups]
-    dev     = ["pandas-stubs>=2.2.3.250308"]
+    dev     = [
+    "pandas-stubs>=2.2.3.250308",
+    "types-tensorflow>=2.18.0.20250404",
+]
     jupyter = ["jupyter>=1.1.1"]
     tests   = ["pytest>=8.3.5", "supaernova-legacy"]
 
