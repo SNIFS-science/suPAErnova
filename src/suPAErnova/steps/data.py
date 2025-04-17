@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
     SNeDataFrame = pd.DataFrame
 
+WL_MASK_MIN = 3298.68
+WL_MASK_MAX = 9701.23
+
 
 class SNPAEData(BaseModel):
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -36,7 +39,7 @@ class SNPAEData(BaseModel):
     MB: npt.NDArray[np.float32]
     hubble_residual: npt.NDArray[np.float32]
     luminosity_distance: npt.NDArray[np.float32]
-    spectra_id: npt.NDArray[np.int64]
+    spectra_id: npt.NDArray[np.str_]
     phase: npt.NDArray[np.float32]
     wl_mask_min: npt.NDArray[np.float32]
     wl_mask_max: npt.NDArray[np.float32]
@@ -298,17 +301,26 @@ class DataStep(SNPAEStep[DataStepConfig]):
             "sn": str,
             "id": str,
             "flag": int,
-            "wl_min": float,
-            "wl_max": float,
+            "wl_mask_min": float,
+            "wl_mask_max": float,
         }
         mask = pd.read_csv(
             self.mask,
             sep="\\s+",
-            names=["sn", "id", "flag", "wl_min", "wl_max"],
+            names=["sn", "id", "flag", "wl_mask_min", "wl_mask_max"],
             dtype=mask_dtypes,
         )
+
+        # Fill NaN values
+        mask.wl_mask_min = mask.wl_mask_min.fillna(np.inf)
+        mask.wl_mask_max = mask.wl_mask_max.fillna(-np.inf)
+
         mask.id = mask.sn + "_" + mask.id
         sne_data = sne_data.merge(mask, on=["sn", "id"], how="left")
+
+        # Fill missing values with default values
+        sne_data.wl_mask_min = sne_data.wl_mask_min.fillna(WL_MASK_MIN)
+        sne_data.wl_mask_max = sne_data.wl_mask_max.fillna(WL_MASK_MAX)
 
         self.log.debug("Merging SNe data")
         # Split data into two dataframes
@@ -325,8 +337,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
             "phase",
             "path",
             "flag",
-            "wl_min",
-            "wl_max",
+            "wl_mask_min",
+            "wl_mask_max",
         ]
         spectra = sne_data[spec_cols].reset_index(drop=True)
 
@@ -365,8 +377,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
         #       phase:          float     = Spectral phase relative to peak mag in days
         #       path:           str       = Path to spectra, relative to metapath
         #       flag:           int       = Quality of spectra
-        #       wl_min: float     = Min wavelength of spectra
-        #       wl_max: float     = Max wavelength of spectra
+        #       wl_mask_min:    float     = Min wavelength of spectra
+        #       wl_mask_max:    float     = Max wavelength of spectra
         #       data:           DataFrame = Spectral data with columns:
         #
         #           wave:  Series[float]  = wavelength in AA
@@ -498,11 +510,12 @@ class DataStep(SNPAEStep[DataStepConfig]):
         ).value
 
         # Get Parameters from spectra
+        max_id_len = max(len(spectra["id"]) for spectra in self.sne["spectra"])
         spectra_params = {
-            "spectra_id": ("id", np.str_("")),
+            "spectra_id": ("id", np.str_("-" * max_id_len)),
             "phase": ("phase", np.float32(-100.0)),
-            "wl_mask_min": ("wl_min", np.float32(-1.0)),
-            "wl_mask_max": ("wl_max", np.float32(-1.0)),
+            "wl_mask_min": ("wl_mask_min", np.inf),
+            "wl_mask_max": ("wl_mask_max", -np.inf),
         }
 
         for data_key, (spectra_key, padding) in spectra_params.items():
@@ -510,12 +523,11 @@ class DataStep(SNPAEStep[DataStepConfig]):
                 [spectra[spectra_key].to_numpy() for spectra in self.sne["spectra"]],
                 padding,
             )
-
         # Get spectral data parameters
         spectral_data_params = {
-            "amplitude": ("flux", np.zeros(self.wl_dim)),
+            "amplitude": ("flux", np.zeros(self.wl_dim) - 1),
             "sigma": ("sigma", np.zeros(self.wl_dim)),
-            "salt_flux": ("salt_flux", np.zeros(self.wl_dim)),
+            "salt_flux": ("salt_flux", np.zeros(self.wl_dim) - 1),
         }
 
         for data_key, (spectral_data_key, padding) in spectral_data_params.items():
@@ -530,13 +542,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
                 padding,
             )
 
-        data["wavelength"] = pad(
-            [
-                [self.wavelength for _ in spectra["data"]]
-                for spectra in self.sne.spectra
-            ],
-            np.zeros(self.wl_dim),
-        )
+        data["wavelength"] = np.tile(self.wavelength, (self.sn_dim, self.nspec_dim, 1))
 
         # Ensure everything has the right number of axes
         for k, v in data.items():
@@ -544,9 +550,45 @@ class DataStep(SNPAEStep[DataStepConfig]):
                 data[k] = v[..., np.newaxis]
 
         # Create a mask of wavelength outside of the wavelength limits
-        data["mask"] = (data["wl_mask_min"] <= data["wavelength"]) & (
+        data["mask"] = np.full(
+            (self.sn_dim, self.nspec_dim, self.wl_dim), fill_value=False
+        )
+
+        base_wl_mask = (data["wl_mask_min"] <= data["wavelength"]) & (
             data["wavelength"] <= data["wl_mask_max"]
         )
+
+        # Pad left and right
+        pad_left = np.pad(
+            base_wl_mask[:, :, :-1],
+            ((0, 0), (0, 0), (1, 0)),
+            mode="constant",
+            constant_values=False,
+        )
+        pad_right = np.pad(
+            base_wl_mask[:, :, 1:],
+            ((0, 0), (0, 0), (0, 1)),
+            mode="constant",
+            constant_values=False,
+        )
+
+        # Compute distances to the boundaries
+        dist_to_min = np.abs(data["wavelength"] - data["wl_mask_min"])
+        dist_to_max = np.abs(data["wavelength"] - data["wl_mask_max"])
+
+        # Left edge logic
+        expand_left = (
+            (~base_wl_mask) & pad_right & (dist_to_min < np.roll(dist_to_min, -1))
+        )
+        # Right edge logic
+        expand_right = (
+            (~base_wl_mask) & pad_left & (dist_to_max < np.roll(dist_to_max, 1))
+        )
+
+        # Combine the masks
+        valid_wavelengths = base_wl_mask | expand_left | expand_right
+
+        data["mask"][valid_wavelengths] = True
 
         # Mask any huge laser lines, Na D (5674 - 5692A)
         # TODO: Make these options
@@ -577,7 +619,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
         smooth_amplitude = 0.5 * (min_amplitude + max_amplitude)
 
         laser_mask = (amplitude - smooth_amplitude) > laser_height
-        data["mask"] &= ~laser_mask
+        # data["mask"] &= ~laser_mask
 
         # --- Finalise Data ---
         # Rescale phase to time such that:
@@ -588,6 +630,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
         data["time"][time_mask] = (data["time"][time_mask] - self.min_phase) / (
             self.max_phase - self.min_phase
         )
+        data["time"][~time_mask] = -1
 
         # Remove negative amplitude from unmasked amplitudes
         data["amplitude"][data["mask"]] = np.clip(

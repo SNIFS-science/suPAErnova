@@ -1,16 +1,42 @@
 #!/usr/bin/env sh
 
 function run {
+    # --- AMDGPU Env Vars ---
     # Trick ROCm into working
-    export HSA_OVERRIDE_GFX_VERSION=11.0.0
+    export HSA_OVERRIDE_GFX_VERSION="11.0.0"
     # Device Selection
-    local device=0
+    local device="0"
     export HIP_VISIBLE_DEVICES="${device}"
 
+    # --- TF Env Vars ---
     # Don't immediately fill vram
     export TF_FORCE_GPU_ALLOW_GROWTH="true"
+    # Enable XLA auto-clustering
+    local TF_XLA_FLAGS="--tf_xla_auto_jit=2 --tf_xla_cpu_global_jit"
+    local XLA_FLAGS=""
 
-    uv run --no-default-groups --group rocm --with jupyter jupyter lab
+    # --- Debug Env Vars ---
+    local debug=0
+    if [ $debug = 1 ]; then
+        export TF_DUMP_GRAPH_PREFIX="/tmp/generated"
+        TF_XLA_FLAGS="${TF_XLA_FLAGS} --tf_xla_clustering_debug  --tf_xla_clustering_debug"
+        XLA_FLAGS="${XLA_FLAGS} --xla_dump_hlo_as_text --xla_dump_to=${TF_DUMP_GRAPH_PREFIX}"
+    fi
+    export TF_XLA_FLAGS
+    export XLA_FLAGS
+
+    # TODO: Make Pydantic options
+    # local backend="tch"
+    local backend="tf"
+
+    local hardware="cpu"
+    # local hardware="cuda"
+    # local hardware="metal"
+    # local hardware="rocm"
+
+    local extra="${backend}-${hardware}"
+    
+    uv run --group jupyter --extra "${extra}" jupyter notebook
 }
 
 run $@

@@ -10,7 +10,18 @@ function run {
     # Don't immediately fill vram
     export TF_FORCE_GPU_ALLOW_GROWTH="true"
 
-    uv run --no-default-groups --group rocm pytest $@
+    # TODO: Make Pydantic options
+    # local backend="tch"
+    local backend="tf"
+
+    local hardware="cpu"
+    # local hardware="cuda"
+    # local hardware="metal"
+    # local hardware="rocm"
+
+    local extra="${backend}-${hardware}"
+    
+    uv run --group tests --extra "${extra}" pytest $@
 }
 
 run $@

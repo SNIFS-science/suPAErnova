@@ -50,10 +50,14 @@ class InputConfig(SNPAEConfig):
 
     @model_validator(mode="after")
     def validate_steps(self) -> Self:
+        if len(self.step_configs) == 0:
+            err = f"No steps have been defined! Please specify at least one of {list(SNPAEStep.steps.keys())}"
+            self._raise(err)
+
         for step_config in self.step_configs:
             for required_step in step_config.required_steps:
                 if getattr(self, required_step) is None:
-                    err = f"{step_config.id} requires that {required_step} is run first"
+                    err = f"{step_config.id} requires that {required_step} is run first, but {required_step} has not been defined!"
                     self._raise(err)
         return self
 

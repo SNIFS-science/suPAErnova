@@ -126,7 +126,9 @@ if __name__ == "__main__":
             laser_height = 0.4  # fractional increase in amplitude over neighbours to be considered laser
 
             speci = data_out["spectra"][
-                i, ispec, wavelength_bin_start:wavelength_bin_end,
+                i,
+                ispec,
+                wavelength_bin_start:wavelength_bin_end,
             ]
             speci_smooth = (
                 data_out["spectra"][
@@ -151,12 +153,15 @@ if __name__ == "__main__":
             ])  # mask bins nearby laser spike as well
 
             data_out["mask"][
-                i, ispec, wavelength_bin_start:wavelength_bin_end,
+                i,
+                ispec,
+                wavelength_bin_start:wavelength_bin_end,
             ] = ~laser_mask
             if np.sum(laser_mask) > 0:
                 print("Laser line found in")
                 print(
-                    data_out["names"][ids[ispec]], data_out["spectra_ids"][ids[ispec]],
+                    data_out["names"][ids[ispec]],
+                    data_out["spectra_ids"][ids[ispec]],
                 )
                 # print(speci[laser_mask], speci_smooth[laser_mask])
 

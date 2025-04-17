@@ -35,7 +35,16 @@
     requires      = ["hatchling"]
 
 [dependency-groups]
-    dev = []
+    dev = [
+    "pandas-stubs>=2.2.3.250308",
+]
+    jupyter = ["jupyter>=1.1.1"]
+    tests = [
+        "pytest>=8.3.5",
+        "pytest-sugar>=1.0.0",
+        "pytest-xdist[psutil]>=3.6.1",
+        "supaernova-legacy",
+    ]
 
 # === Tools ===
 [tool.uv]
@@ -60,8 +69,14 @@
         members = ["packages/*"]
 
     [tool.uv.sources]
-        suPAErnova_legacy = {workspace = true}
+        supaernova-legacy = {workspace = true}
         tensorflow-rocm   = {url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl"}
+
+[tool.pytest.ini_options]
+    addopts    = ["--import-mode=importlib"]
+    markers    = ["setup: Setup cached data without running any tests"]
+    pythonpath = ["."]
+    testpaths  = ["tests"]
 
 [tool.basedpyright]
     # Enable all type checks
@@ -92,9 +107,6 @@
     # Don't report when objects are of type Any
     reportAny         = false
     reportExplicitAny = false
-
-    # Don't report missing type stubs, as many packages don't include them
-    reportMissingTypeStubs = false
 
 [tool.ruff]
     # Enumerate all fixed violations.
@@ -137,6 +149,8 @@
             "TC001", # Move first party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
             "TC002", # Move third party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
             "TC003", # Move standard library typing-only imports into a TYPE_CHECKING block. Breaks pydantic
+        ], "tests/**/*.py" = [
+            "S101", # Don't warn when assert is used in tests
         ]}
 
 
