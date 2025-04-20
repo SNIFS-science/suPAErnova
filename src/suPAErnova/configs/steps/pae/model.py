@@ -107,7 +107,7 @@ class PAEModelConfig(StepConfig):
     max_val_phase: float = +float("inf")
 
     # --- Data Offsets ---
-    phase_offset_scale: Literal[0, -1] | PositiveFloat = 0
+    phase_offset_scale: float = 0
     amplitude_offset_scale: NonNegativeFloat = 0
     mask_fraction: Annotated[float, Field(ge=0, le=1)] = 0
 

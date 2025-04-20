@@ -1,26 +1,26 @@
 import numpy as np
 import pytest
 
-from suPAErnova.steps.data import DataStepResult
+from suPAErnova.steps.pae.model import PAEStepResult
 
-KEYS = list(DataStepResult.model_fields.keys())
+KEYS = list(PAEStepResult.model_fields.keys())
 
 
 @pytest.mark.parametrize("key", KEYS)
 def test_shapes(
-    key: str, snpae_data: "DataStepResult", legacy_data: "DataStepResult"
+    key: str, snpae_pae: "PAEStepResult", legacy_pae: "PAEStepResult"
 ) -> None:
-    snpae_shape = getattr(snpae_data, key).shape
-    legacy_shape = getattr(legacy_data, key).shape
+    snpae_shape = getattr(snpae_pae, key).shape
+    legacy_shape = getattr(legacy_pae, key).shape
     assert snpae_shape == legacy_shape
 
 
 @pytest.mark.parametrize("key", KEYS)
 def test_matching_values(
-    key: str, snpae_data: "DataStepResult", legacy_data: "DataStepResult"
+    key: str, snpae_pae: "PAEStepResult", legacy_pae: "PAEStepResult"
 ) -> None:
-    snpae_vals = getattr(snpae_data, key)
-    legacy_vals = getattr(legacy_data, key)
+    snpae_vals = getattr(snpae_pae, key)
+    legacy_vals = getattr(legacy_pae, key)
 
     compare = (
         np.allclose

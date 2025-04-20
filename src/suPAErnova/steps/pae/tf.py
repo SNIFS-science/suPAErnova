@@ -146,8 +146,10 @@ class TFPAEEncoder(ks.layers.Layer):
         self.encode_dims: list[int] = options.encode_dims
 
         self.activation: "Callable[[tf.Tensor], tf.Tensor]" = options.activation_fn
-        self.regulariser: ks.regularizers.Regularizer = options.kernel_regulariser_cls(
-            options.kernel_regulariser_penalty
+        self.regulariser: ks.regularizers.Regularizer | None = (
+            options.kernel_regulariser_cls(options.kernel_regulariser_penalty)
+            if options.kernel_regulariser_cls is not None
+            else None
         )
 
         self.dropout: float = options.dropout
@@ -213,7 +215,7 @@ class TFPAEEncoder(ks.layers.Layer):
                 TypedLayer(
                     ks.layers.Dropout(self.dropout, noise_shape=[None, 1, None])
                     if self.dropout > 0
-                    else ks.layers.Identity()
+                    else ks.layers.Identity(trainable=False)
                 )
             )
             # Batch normalisation layer
@@ -221,7 +223,7 @@ class TFPAEEncoder(ks.layers.Layer):
                 TypedLayer(
                     ks.layers.BatchNormalization()
                     if self.batch_normalisation
-                    else ks.layers.Identity()
+                    else ks.layers.Identity(trainable=False)
                 )
             )
 
@@ -369,8 +371,11 @@ class TFPAEDecoder(ks.layers.Layer):
         self.decode_dims: list[int] = options.decode_dims
 
         self.activation: "Callable[[tf.Tensor], tf.Tensor]" = options.activation_fn
-        self.regulariser: ks.regularizers.Regularizer = options.kernel_regulariser_cls(
-            options.kernel_regulariser_penalty
+
+        self.regulariser: ks.regularizers.Regularizer | None = (
+            options.kernel_regulariser_cls(options.kernel_regulariser_penalty)
+            if options.kernel_regulariser_cls is not None
+            else None
         )
         self.batch_normalisation: bool = options.batch_normalisation
 
@@ -444,7 +449,7 @@ class TFPAEDecoder(ks.layers.Layer):
                 TypedLayer(
                     ks.layers.BatchNormalization()
                     if self.batch_normalisation
-                    else ks.layers.Identity()
+                    else ks.layers.Identity(trainable=False)
                 )
             )
 
@@ -467,7 +472,7 @@ class TFPAEDecoder(ks.layers.Layer):
                 else ks.constraints.NonNeg(),
             )
             if self.physical_latents
-            else ks.layers.Identity()
+            else ks.layers.Identity(trainable=False)
         )
 
     @override
@@ -737,10 +742,10 @@ class TFPAEModel(ks.Model):
         if self.physical_latents and self.loss_physical_penalty > 0:
             latents_penalty_scale = tf.concat(
                 (
-                    tf.constant((self.loss_delta_av_penalty,)),
-                    tf.zeros(self.n_zs),
-                    tf.constant((self.loss_delta_m_penalty,)),
-                    tf.constant((self.loss_delta_p_penalty,)),
+                    tf.constant((self.loss_delta_av_penalty,), dtype=tf.float32),
+                    tf.zeros(self.n_zs, dtype=tf.float32),
+                    tf.constant((self.loss_delta_m_penalty,), dtype=tf.float32),
+                    tf.constant((self.loss_delta_p_penalty,), dtype=tf.float32),
                 ),
                 axis=0,
             )
@@ -1206,10 +1211,12 @@ class TFPAEModel(ks.Model):
         # --- Phase Offset ---
         if self.phase_offset_scale != 0:
             d_phase_shape = tf.shape(d_phase)
-            if self.phase_offset_scale == 0:
-                phase_offset = tf.zeros_like(d_phase)
-            elif self.phase_offset_scale == -1:
-                phase_offset = d_phase * tf.random.normal(d_phase_shape)
+            if self.phase_offset_scale < 0:
+                phase_offset = (
+                    abs(self.phase_offset_scale)
+                    * d_phase
+                    * tf.random.normal(d_phase_shape)
+                )
             else:
                 phase_offset = (
                     tf.ones_like(d_phase)

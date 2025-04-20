@@ -6,7 +6,7 @@ from pathlib import Path  # noqa: TC003
 from pydantic import BaseModel, PositiveInt  # noqa: TC002
 
 from suPAErnova.steps import SNPAEStep
-from suPAErnova.steps.data import SNPAEData  # noqa: TC001
+from suPAErnova.steps.data import DataStepResult  # noqa: TC001
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -35,9 +35,9 @@ class Stage(BaseModel):
 
     n_chains: int
 
-    train_data: SNPAEData
-    test_data: SNPAEData
-    val_data: SNPAEData
+    train_data: DataStepResult
+    test_data: DataStepResult
+    val_data: DataStepResult
 
     init_latents: "InitVars"
     init_delta_av: "InitVars"
@@ -67,9 +67,9 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
         # --- Previous Step Variables ---
         self.nflow: "NFlowModel[NFLOW, NFLOWConfig]"
-        self.train_data: SNPAEData
-        self.test_data: SNPAEData
-        self.val_data: SNPAEData
+        self.train_data: DataStepResult
+        self.test_data: DataStepResult
+        self.val_data: DataStepResult
 
         # --- Setup Variables ---
         self.n_chains_early: int = self.options.n_chains_early

@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Callable
 
-    from suPAErnova.steps.data import DataStep, SNPAEData
+    from suPAErnova.steps.data import DataStep, DataStepResult
 
 
 @pytest.fixture(scope="session")
@@ -34,7 +34,7 @@ def snpae_data_step_factory(
         snpae = suPAErnova.prepare_config(
             config,
             base_path=root_path,
-            out_path=cache_path / "snpae" / "data" / data_params["fname"],
+            out_path=cache_path / data_params["fname"] / "data" / "snpae",
         )
         snpae.run()
         datastep = snpae.data_step
@@ -47,8 +47,8 @@ def snpae_data_step_factory(
 @pytest.fixture(scope="session")
 def snpae_data_result_factory(
     snpae_data_step_factory: "Callable[[dict[str, Any]], DataStep]",
-) -> "Callable[[dict[str, Any]], SNPAEData]":
-    def _snpae_data_result(data_params: dict[str, "Any"]) -> "SNPAEData":
+) -> "Callable[[dict[str, Any]], DataStepResult]":
+    def _snpae_data_result(data_params: dict[str, "Any"]) -> "DataStepResult":
         return snpae_data_step_factory(data_params).data
 
     return _snpae_data_result

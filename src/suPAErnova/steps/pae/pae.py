@@ -2,9 +2,10 @@
 from typing import TYPE_CHECKING, ClassVar, override
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict
 
 from suPAErnova.steps import SNPAEStep
-from suPAErnova.steps.data import SNPAEData
+from suPAErnova.steps.data import DataStepResult
 from suPAErnova.configs.steps.pae import PAEStepConfig
 from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
 from suPAErnova.configs.steps.pae.tch import TCHPAEModelConfig
@@ -21,6 +22,8 @@ if TYPE_CHECKING:
     from suPAErnova.steps.data import DataStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
+
+    from .model import PAEStepResult
 
 ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
 Model = TFPAEModel | TCHPAEModel
@@ -50,14 +53,17 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
 
         # --- Setup Variables ---
         self.pae_models: list[PAEModel[Model, ModelConfig]]
-        self.train_data: list[SNPAEData]
-        self.test_data: list[SNPAEData]
-        self.val_data: list[SNPAEData]
+        self.train_data: list[DataStepResult]
+        self.test_data: list[DataStepResult]
+        self.val_data: list[DataStepResult]
         self.n_models: int
         self.n_kfolds: int
 
         self.seed: int = self.options.seed
         self.rng: np.random.Generator = np.random.default_rng(self.seed)
+
+        # --- Output Variables ---
+        self.pae: list[PAEStepResult]
 
     @override
     def _setup(self, *, data: "DataStep") -> None:
@@ -86,13 +92,13 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
         if self.validation_frac > 0:
             ind_split = int(self.data.sn_dim * self.validation_frac)
             val_data = [
-                SNPAEData.model_validate({
+                DataStepResult.model_validate({
                     k: v[-ind_split:] for k, v in d.model_dump().items()
                 })
                 for d in train_data
             ]
             train_data = [
-                SNPAEData.model_validate({
+                DataStepResult.model_validate({
                     k: v[:-ind_split] for k, v in d.model_dump().items()
                 })
                 for d in train_data
@@ -128,6 +134,7 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
     def _load(self) -> None:
         for pae_model in self.pae_models:
             pae_model.load()
+        self.pae = [pae_model.pae for pae_model in self.pae_models]
 
     @override
     def _run(self) -> None:
@@ -138,6 +145,7 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
     def _result(self) -> None:
         for pae_model in self.pae_models:
             pae_model.result()
+        self.pae = [pae_model.pae for pae_model in self.pae_models]
 
     @override
     def _analyse(self) -> None:

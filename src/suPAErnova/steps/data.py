@@ -26,7 +26,7 @@ WL_MASK_MIN = 3298.68
 WL_MASK_MAX = 9701.23
 
 
-class SNPAEData(BaseModel):
+class DataStepResult(BaseModel):
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
 
     ind: "npt.NDArray[np.int32]"
@@ -102,9 +102,9 @@ class DataStep(SNPAEStep[DataStepConfig]):
 
         # Output objects
         self.sne: SNeDataFrame
-        self.data: SNPAEData
-        self.train_data: list[SNPAEData]
-        self.test_data: list[SNPAEData]
+        self.data: DataStepResult
+        self.train_data: list[DataStepResult]
+        self.test_data: list[DataStepResult]
 
         # Data Dimensions
         self.sn_dim: int
@@ -204,7 +204,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
         self.log.debug(f"Loading data arrays from {self.out_data}")
         with np.load(self.out_data, allow_pickle=True) as io:
             data = dict(io)
-        self.data = SNPAEData.model_validate(data)
+        self.data = DataStepResult.model_validate(data)
 
         # Load in training and testing data
         self.log.debug(f"Loading training data arrays from {self.out_train}")
@@ -215,7 +215,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
                     data = {}
                     for k, v in io.items():
                         data[k] = v
-                    self.train_data.append(SNPAEData.model_validate(data))
+                    self.train_data.append(DataStepResult.model_validate(data))
 
         self.log.debug(f"Loading testing data arrays from {self.out_test}")
         self.test_data = []
@@ -225,7 +225,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
                     data = {}
                     for k, v in io.items():
                         data[k] = v
-                    self.test_data.append(SNPAEData.model_validate(data))
+                    self.test_data.append(DataStepResult.model_validate(data))
 
     @override
     def _run(self) -> None:
@@ -651,7 +651,7 @@ class DataStep(SNPAEStep[DataStepConfig]):
 
         data["mask"] = data["mask"].astype(np.int32)
 
-        self.data = SNPAEData.model_validate(data)
+        self.data = DataStepResult.model_validate(data)
 
     def split_train_test(self) -> None:
         self.train_data = []
@@ -672,13 +672,13 @@ class DataStep(SNPAEStep[DataStepConfig]):
             inds_test = inds_k[ind_split:]
 
             self.train_data.append(
-                SNPAEData.model_validate({
+                DataStepResult.model_validate({
                     key: val[inds_train, :, :] if val.ndim == 3 else val[inds_train, :]
                     for key, val in self.data.model_dump().items()
                 })
             )
             self.test_data.append(
-                SNPAEData.model_validate({
+                DataStepResult.model_validate({
                     key: val[inds_test, :, :] if val.ndim == 3 else val[inds_test, :]
                     for key, val in self.data.model_dump().items()
                 })

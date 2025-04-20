@@ -18,15 +18,9 @@ def data_path(root_path: Path) -> Path:
     return root_path / "data"
 
 
-# @pytest.fixture(scope="session")
-# def cache_path(root_path: Path) -> Path:
-#     return root_path / "cache"
-
-
 @pytest.fixture(scope="session")
-def cache_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return tmp_path_factory.mktemp("cache")
-
+def cache_path(root_path: Path) -> Path:
+    return root_path / "cache"
 
 @pytest.fixture(scope="session")
 def tests_path(root_path: Path) -> Path:

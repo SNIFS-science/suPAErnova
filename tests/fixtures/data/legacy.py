@@ -8,7 +8,7 @@ import pytest
 from astropy import cosmology as cosmo
 import sncosmo
 
-from suPAErnova.steps.data import SNPAEData
+from suPAErnova.steps.data import DataStepResult
 
 if TYPE_CHECKING:
     from typing import Any
@@ -397,8 +397,8 @@ def legacy_data_step_factory(
 @pytest.fixture(scope="session")
 def legacy_data_result_factory(
     legacy_data_step_factory: "Callable[[dict[str, Any]], dict[str, Any]]",
-) -> "Callable[[dict[str, Any]], SNPAEData]":
-    def _legacy_data_result(data_params: dict[str, "Any"]) -> "SNPAEData":
-        return SNPAEData.model_validate(legacy_data_step_factory(data_params))
+) -> "Callable[[dict[str, Any]], DataStepResult]":
+    def _legacy_data_result(data_params: dict[str, "Any"]) -> "DataStepResult":
+        return DataStepResult.model_validate(legacy_data_step_factory(data_params))
 
     return _legacy_data_result

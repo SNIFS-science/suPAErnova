@@ -6,13 +6,14 @@ from pathlib import Path  # noqa: TC003
 import numpy as np
 from pydantic import (  # noqa: TC002
     BaseModel,
+    ConfigDict,
     PositiveInt,
     PositiveFloat,
     NonNegativeFloat,
 )
 
 from suPAErnova.steps import SNPAEStep
-from suPAErnova.steps.data import SNPAEData  # noqa: TC001
+from suPAErnova.steps.data import DataStepResult  # noqa: TC001
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -22,6 +23,11 @@ if TYPE_CHECKING:
     from suPAErnova.configs.globals import GlobalConfig
 
     from .pae import Model, ModelConfig
+
+
+class PAEStepResult(BaseModel):
+    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
+    name: str
 
 
 class Stage(BaseModel):
@@ -39,9 +45,9 @@ class Stage(BaseModel):
     learning_rate_decay_rate: PositiveFloat
     learning_rate_weight_decay_rate: PositiveFloat
 
-    train_data: SNPAEData
-    test_data: SNPAEData
-    val_data: SNPAEData
+    train_data: DataStepResult
+    test_data: DataStepResult
+    val_data: DataStepResult
 
     moving_means: list[float]
 
@@ -90,9 +96,9 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
         # --- Previous Step Variables ---
         self.data: DataStep
-        self.train_data: SNPAEData
-        self.test_data: SNPAEData
-        self.val_data: SNPAEData
+        self.train_data: DataStepResult
+        self.test_data: DataStepResult
+        self.val_data: DataStepResult
 
         self.nspec_dim: int
         self.wl_dim: int
@@ -105,6 +111,9 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.stage_delta_p: Stage
         self.stage_final: Stage
         self.run_stages: list[Stage]
+
+        # --- Output Variables ---
+        self.pae: PAEStepResult
 
     def prep_model(self, *, force: bool = False) -> M:
         if not force:
@@ -121,9 +130,9 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self,
         *,
         data: "DataStep",
-        train_data: SNPAEData,
-        test_data: SNPAEData,
-        val_data: SNPAEData,
+        train_data: DataStepResult,
+        test_data: DataStepResult,
+        val_data: DataStepResult,
     ) -> None:
         # --- Config Variables ---
         # Required
@@ -305,6 +314,10 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.log.debug(f"Saving final PAE model weights to {final_savepath}")
         self.model.save_checkpoint(final_savepath)
 
+        self.log.debug("Calculating pae results")
+        results = {"name": self.model.name}
+        self.pae = PAEStepResult.model_validate(results)
+
     @override
     def _analyse(self) -> None:
         pass
@@ -315,7 +328,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     def setup_data_masks(self) -> None:
         for mask_type in ["train", "test", "val"]:
-            data: SNPAEData = getattr(self, f"{mask_type}_data")
+            data: DataStepResult = getattr(self, f"{mask_type}_data")
             min_redshift: float = getattr(self, f"min_{mask_type}_redshift")
             max_redshift: float = getattr(self, f"max_{mask_type}_redshift")
             redshift_mask = (data.redshift >= min_redshift) & (
