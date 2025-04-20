@@ -1,3 +1,1 @@
-from .posterior import PosteriorStepConfig
-
-__all__ = ["PosteriorStepConfig"]
+from .posterior import *
