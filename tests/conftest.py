@@ -1,4 +1,3 @@
 from .fixtures.paths import data_path, root_path, cache_path, tests_path, fixtures_path
-from .fixtures.data.data import data_step_factory, data_result_factory
 from .fixtures.data.snpae import snpae_data_step_factory, snpae_data_result_factory
 from .fixtures.data.legacy import legacy_data_step_factory, legacy_data_result_factory

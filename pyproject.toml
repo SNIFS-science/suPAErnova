@@ -20,6 +20,8 @@
     version = "0.1.0"
 
     [project.optional-dependencies]
+        legacy = ["supaernova-legacy"]
+
         tf-cpu   = ["tensorflow-cpu"]
         tf-cuda  = ["tensorflow"]
         tf-metal = ["tensorflow-metal"]
@@ -35,12 +37,9 @@
     requires      = ["hatchling"]
 
 [dependency-groups]
-    dev     = [
-    "pandas-stubs>=2.2.3.250308",
-    "types-tensorflow>=2.18.0.20250404",
-]
+    dev     = ["pandas-stubs>=2.2.3.250308", "types-tensorflow>=2.18.0.20250404"]
     jupyter = ["jupyter>=1.1.1"]
-    tests   = ["pytest>=8.3.5", "supaernova-legacy"]
+    tests   = ["pytest>=8.3.5"]
 
 # === Tools ===
 [tool.uv]
@@ -50,6 +49,7 @@
             {extra = "tf-cuda"},
             {extra = "tf-metal"},
             {extra = "tf-rocm"},
+            {extra = "legacy"},
         ],
         [
             {extra = "tch-cpu"},

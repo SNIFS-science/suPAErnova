@@ -21,6 +21,7 @@ function run {
 
     local extra="${backend}-${hardware}"
     
+    uv sync --group tests --extra "${extra}"
     uv run --group tests --extra "${extra}" pytest $@
 }
 
