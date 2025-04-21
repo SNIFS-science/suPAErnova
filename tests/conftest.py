@@ -3,11 +3,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from .fixtures.paths import data_path, root_path, cache_path, tests_path, fixtures_path
+from .fixtures.pae.snpae import snpae_pae_step_factory, snpae_pae_result_factory
 from .fixtures.data.snpae import snpae_data_step_factory, snpae_data_result_factory
+from .fixtures.pae.legacy import legacy_pae_step_factory, legacy_pae_result_factory
 from .fixtures.data.legacy import legacy_data_step_factory, legacy_data_result_factory
 
 if TYPE_CHECKING:
+    from _pytest.nodes import Item
     from _pytest.config import Config
+    from _pytest.config.argparsing import Parser
 
 
 def pytest_configure(config: "Config") -> None:
@@ -23,11 +27,16 @@ def pytest_configure(config: "Config") -> None:
 
     config.addinivalue_line(
         "markers",
-        "data: Data step tests",
+        "data: Data Step tests",
+    )
+
+    config.addinivalue_line(
+        "markers",
+        "pae: PAE Step tests",
     )
 
 
-def pytest_addoption(parser) -> None:
+def pytest_addoption(parser: "Parser") -> None:
     parser.addoption(
         "--setup",
         action="store",
@@ -35,7 +44,7 @@ def pytest_addoption(parser) -> None:
     )
 
 
-def pytest_runtest_setup(item) -> None:
+def pytest_runtest_setup(item: "Item") -> None:
     setup = [mark.args[0] for mark in item.iter_markers(name="setup")]
     if setup:
         if item.config.getoption("--setup") not in setup:

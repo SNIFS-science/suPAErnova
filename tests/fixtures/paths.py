@@ -22,6 +22,7 @@ def data_path(root_path: Path) -> Path:
 def cache_path(root_path: Path) -> Path:
     return root_path / "cache"
 
+
 @pytest.fixture(scope="session")
 def tests_path(root_path: Path) -> Path:
     return root_path / "tests"

@@ -1,35 +1,36 @@
-# !/usr/bin/env python
-"""This code constructs and trains the Autoencoder model,
-based on the parameters specified in the configuration file, config/train.yaml.
-
-The Autoencoder architecture is specified in models/autoencoder.py,
-and the loss terms are specified in models/losses.py.
-"""
-
-import tensorflow as tf
-
-print("tensorflow version: ", tf.__version__)
-print("devices: ", tf.config.list_physical_devices("GPU"))
 import os
-import sys
-import time
+from typing import TYPE_CHECKING
 import argparse
 
 import numpy as np
-import tensorflow_addons as tfa
-import tensorboard.plugins.hparams as HParams
-
-from suPAErnova.utils import data_loader
-from suPAErnova.models import (
+import pytest
+import tensorflow as tf
+from supaernova_legacy.utils import data_loader
+from supaernova_legacy.models import (
     loader as model_loader,
     losses,
     autoencoder,
     autoencoder_training,
 )
-from suPAErnova.utils.YParams import YParams
+from supaernova_legacy.utils.YParams import YParams
+
+from suPAErnova.configs.steps.pae import PAEStepResult
+
+if TYPE_CHECKING:
+    from typing import Any
+    from pathlib import Path
+    from collections.abc import Callable
 
 
-def main() -> None:
+def legacy_pae_step(
+    data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
+) -> dict[str, "Any"]:
+    # Except where indicated, this is taken verbatim from the `train_ae` script
+    # Comments have been removed
+    # Print statements have been removed
+    # Plotting has been removed
+    # Unused variables have been removed
+
     # Set model Architecture and training params and train
     parser = argparse.ArgumentParser()
     parser.add_argument("--yaml_config", default="../config/train.yaml", type=str)
@@ -97,7 +98,7 @@ def main() -> None:
         print(f"Training model with {latent_dim:d} latent dimensions")
         print("Running training stage ", params["train_stage"])
         # Train model, splitting into seperate training stages for seperate model parameters, if desired.
-        training_loss, val_loss, test_loss = autoencoder_training.train_model(
+        _training_loss, _val_loss, _test_loss = autoencoder_training.train_model(
             train_data,
             val_data,
             test_data,
@@ -122,7 +123,7 @@ def main() -> None:
                 AEmodel_second.params["epochs"] = params["epochs_final"]
 
             # Load best checkpoint from step 0 training
-            encoder, decoder, AE_params = model_loader.load_ae_models(params)
+            encoder, decoder, _AE_params = model_loader.load_ae_models(params)
 
             final_dense_layer = len(params["encode_dims"]) + 4
 
@@ -152,7 +153,7 @@ def main() -> None:
             AEmodel_second.encoder.set_weights(encoder.get_weights())
             AEmodel_second.decoder.set_weights(decoder.get_weights())
 
-            training_loss, val_loss, test_loss = autoencoder_training.train_model(
+            _training_loss, _val_loss, _test_loss = autoencoder_training.train_model(
                 train_data,
                 val_data,
                 test_data,
@@ -160,7 +161,39 @@ def main() -> None:
             )
 
             params["train_stage"] += 1
+    return {}
 
 
-if __name__ == "__main__":
-    main()
+@pytest.fixture(scope="session")
+def legacy_pae_step_factory(
+    data_path: "Path",
+    root_path: "Path",
+    cache_path: "Path",
+) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]":
+    def _legacy_pae_step(
+        data_params: dict[str, "Any"], pae_params: "dict[str, Any]"
+    ) -> "dict[str, Any]":
+        data_params["data_path"] = data_path
+        data_params["root_path"] = root_path
+        data_params["cache_path"] = cache_path
+
+        pae_params["data_path"] = data_path
+        pae_params["root_path"] = root_path
+        pae_params["cache_path"] = cache_path
+        return legacy_pae_step(data_params, pae_params)
+
+    return _legacy_pae_step
+
+
+@pytest.fixture(scope="session")
+def legacy_pae_result_factory(
+    legacy_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]",
+) -> "Callable[[dict[str, Any], dict[str, Any]], PAEStepResult]":
+    def _legacy_pae_result(
+        data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
+    ) -> "PAEStepResult":
+        return PAEStepResult.model_validate(
+            legacy_pae_step_factory(data_params, pae_params)
+        )
+
+    return _legacy_pae_result

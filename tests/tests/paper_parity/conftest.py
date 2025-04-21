@@ -47,42 +47,7 @@ def legacy_data(
 
 @pytest.fixture(scope="module")
 def pae_params(data_path: "Path") -> dict[str, "Any"]:
-    return {
-        "model": {
-            "architecture": "dense",
-            "encode_dims": [256, 128],
-            "n_z_latents": 3,
-            "physical_latents": True,
-            "batch_normalisation": True,
-            "dropout": 0.2,
-            "backend": "tf",
-            "seperate_z_latent_training": True,
-            "seperate_latent_training": True,
-            "colourlaw": data_path / "colourlaws" / "F99_colourlaw.txt",
-            "loss_residual_penalty": 0.0,
-            "loss_delta_m_penalty": 0.0,
-            "loss_covariance_penalty": 0.0,
-            "loss_decorrelate_dust": False,
-            "loss_decorrelate_all": False,
-            "seed": 12345,
-            "min_train_redshift": 0.02,
-            "max_train_redshift": 1.0,
-            "min_train_phase": -10,
-            "max_train_phase": 40,
-            "activation": "relu",
-            "kernel_regulariser": "l2",
-            "kernel_regulariser_penalty": 0.01,
-            "scheduler": "ExponentialDecay",
-            "optimiser": "AdamW",
-            "loss": "Huber",
-            "amplitude_offset_scale": 1.0,
-            "mask_fraction": 0.1,
-            "phase_offset_scale": -0.02,
-            "debug": False,
-        },
-        "validation_frac": 0.33,
-        "fname": "paper_parity",
-    }
+    return {"fname": "paper_parity"}
 
 
 @pytest.fixture(scope="module")

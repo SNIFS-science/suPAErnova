@@ -58,13 +58,9 @@
         ],
     ]
     environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
-    override-dependencies = ["tensorflow; sys_platform == 'never'"]
-
-    [tool.uv.workspace]
-        members = ["packages/*"]
 
     [tool.uv.sources]
-        supaernova-legacy = {workspace = true}
+        supaernova-legacy = {path = "../suPAErnova_legacy/"}
         tensorflow-rocm   = {url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl"}
 
 [tool.pytest.ini_options]
