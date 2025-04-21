@@ -1,3 +1,3 @@
-# Copyright 2025 Patrick Armstrong
+from .configs import SNPAEConfig, callback
 
-from .configs import *
+__all__ = ("SNPAEConfig", "callback")

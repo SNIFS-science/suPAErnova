@@ -13,21 +13,16 @@ from pydantic import (
     model_validator,
 )
 
-from suPAErnova.configs.steps import StepConfig
 from suPAErnova.configs.steps.data import DataStepConfig
-
-TFBackend = Literal["tf", "tensorflow"]
-TCHBackend = Literal["tch", "torch"]
-Backend = TFBackend | TCHBackend
+from suPAErnova.configs.steps.backends import AbstractModelConfig
 
 
-class PAEModelConfig(StepConfig):
+class PAEModelConfig(AbstractModelConfig):
     # --- Class Variables ---
     id: ClassVar[str] = "pae_model"
     required_steps: ClassVar[list[str]] = [DataStepConfig.id]
 
     # === Required ===
-    backend: Backend
     debug: bool = False
 
     @model_validator(mode="after")

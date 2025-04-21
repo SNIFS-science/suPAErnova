@@ -1,4 +1,4 @@
-from typing import Any, Concatenate, cast, override
+from typing import TYPE_CHECKING, Any, Concatenate, cast, override
 from functools import cached_property
 from collections.abc import Callable
 

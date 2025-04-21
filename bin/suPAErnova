@@ -1,0 +1,107 @@
+#!/usr/bin/env sh
+
+# Follow however many symlinks are needed to get the true directory and name of this script
+SOURCE=${BASH_SOURCE[0]}
+while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+    DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+    SOURCE=$(readlink "$SOURCE")
+    [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SCRIPT_DIR=$( cd -P "$( dirname "$SOURCE" )/../" >/dev/null 2>&1 && pwd )
+SCRIPT_NAME="$( basename "$SOURCE" )"
+
+function main {
+    # --- Extra ---
+    # Default to Tensorflow / CPU
+    local backend="tf"
+    local hardware="cpu"
+    local extra=""
+
+    # --- Group ---
+    local group=""
+
+    # --- Command ---
+    local cmd="python -m ${SCRIPT_NAME}"
+
+    # --- Args ---
+    for arg in "${@}"; do
+        case ${arg} in
+            # Backend args
+            --backend=*)
+                backend="${arg#*=}"
+                shift
+                ;;
+            tf)
+                backend="tf"
+                shift
+                ;;
+            tch)
+                backend="tch"
+                shift
+                ;;
+            # Hardware args
+            --hardware=*)
+                hardware="${arg#*=}"
+                shift
+                ;;
+            cpu)
+                hardware="cpu"
+                shift
+                ;;
+            cuda)
+                hardware="cuda"
+                shift
+                ;;
+            metal)
+                hardware="metal"
+                shift
+                ;;
+            rocm)
+                hardware="rocm"
+                shift
+                ;;
+            # Extras args
+            --extra=*)
+                extra="${arg#*=}"
+                shift
+                ;;
+            legacy)
+                extra="legacy"
+                shift
+                ;;
+            # Groups args
+            --group=*)
+                group="${arg#*=}"
+                shift
+                ;;
+            test)
+                group="tests"
+                cmd="pytest"
+                shift
+                ;;
+            jupyter)
+                group="jupyter"
+                cmd="jupyter notebook"
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "${extra}" ]]; then
+        extra="${backend}-${hardware}"
+    fi
+    local extra_cmd="--extra ${extra}"
+
+    local group_cmd=""
+    if [[ -n "${group}" ]]; then
+        group_cmd="--group ${group}"
+    fi
+
+    # --- Sync ---
+    uv sync ${extra_cmd} ${group_cmd}
+
+    # --- Run ---
+    uv run ${extra_cmd} ${group_cmd} ${cmd} ${@}
+}
+
+main $@

@@ -2,18 +2,15 @@ from typing import ClassVar
 
 from pydantic import PositiveInt, PositiveFloat
 
-from suPAErnova.configs.steps import StepConfig
 from suPAErnova.configs.steps.nflow import NFlowStepConfig
-from suPAErnova.configs.steps.pae.model import Backend
+from suPAErnova.configs.steps.backends import AbstractModelConfig
 
 
-class PosteriorModelConfig(StepConfig):
+class PosteriorModelConfig(AbstractModelConfig):
     # --- Class Variables ---
-    id: ClassVar[str] = "posterior_model"
     required_steps: ClassVar[list[str]] = [NFlowStepConfig.id]
 
     # === Required ===
-    backend: Backend
     debug: bool = False
 
     # === Optional ===

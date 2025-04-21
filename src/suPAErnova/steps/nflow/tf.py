@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from suPAErnova.steps.pae.tf import S, FTensor, TFPAEModel, TensorCompatible
     from suPAErnova.configs.steps.nflow.tf import TFNFlowModelConfig
 
-    from .model import NFlowModel
+    from .model import NFlowModelStep
 
     # === Custom Types
     NFlowInputs = FTensor[S["batch_dim n_flow_latents"]]
@@ -41,13 +41,13 @@ class TFNFlowLoss(ks.losses.Loss):
 class TFNFlowModel(ks.Model):
     def __init__(
         self,
-        config: "NFlowModel[TFNFlowModel, TFNFlowModelConfig]",
+        config: "NFlowModelStep[TFNFlowModelConfig]",
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
         super().__init__(*args, name=f"{config.name.split()[-1]}NFlowModel", **kwargs)
         # --- Config ---
-        options = cast("TFNFlowModelConfig", config.options)
+        options = config.options
         self.log: Logger = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force

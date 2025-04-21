@@ -1,1 +1,3 @@
-from .nflow import *
+from .nflow import NFlowStepConfig, NFlowModelConfig
+
+__all__ = ("NFlowModelConfig", "NFlowStepConfig")

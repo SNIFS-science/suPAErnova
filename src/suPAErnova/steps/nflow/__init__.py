@@ -1,1 +1,3 @@
-from .nflow import *
+from .nflow import NFlowStep
+
+__all__ = ("NFlowStep",)

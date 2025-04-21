@@ -20,8 +20,7 @@
     version = "0.1.0"
 
     [project.optional-dependencies]
-        legacy = ["supaernova-legacy"]
-
+        legacy   = ["supaernova-legacy"]
         tf-cpu   = ["tensorflow-cpu"]
         tf-cuda  = ["tensorflow"]
         tf-metal = ["tensorflow-metal"]
@@ -45,11 +44,11 @@
 [tool.uv]
     conflicts = [
         [
+            {extra = "legacy"},
             {extra = "tf-cpu"},
             {extra = "tf-cuda"},
             {extra = "tf-metal"},
             {extra = "tf-rocm"},
-            {extra = "legacy"},
         ],
         [
             {extra = "tch-cpu"},
@@ -70,7 +69,6 @@
 
 [tool.pytest.ini_options]
     addopts    = ["--import-mode=importlib"]
-    markers    = ["setup: Setup cached data without running any tests"]
     pythonpath = ["."]
     testpaths  = ["tests"]
 

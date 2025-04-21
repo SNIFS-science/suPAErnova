@@ -2,13 +2,11 @@ from typing import TYPE_CHECKING, ClassVar, cast, override
 from pathlib import Path
 
 import numpy as np
-from numpy import typing as npt  # noqa: TC002
 import pandas as pd
 from astropy import cosmology as cosmo
 import sncosmo
-from pydantic import BaseModel, ConfigDict
 
-from suPAErnova.configs.steps.data import DataStepConfig
+from suPAErnova.configs.steps.data import DataStepResult
 
 from .steps import SNPAEStep
 
@@ -17,8 +15,11 @@ if TYPE_CHECKING:
     from logging import Logger
     from collections.abc import Iterable, Sequence
 
+    from numpy import typing as npt
+
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
+    from suPAErnova.configs.steps.data import DataStepConfig
 
     SNeDataFrame = pd.DataFrame
 
@@ -26,37 +27,11 @@ WL_MASK_MIN = 3298.68
 WL_MASK_MAX = 9701.23
 
 
-class DataStepResult(BaseModel):
-    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
-
-    ind: "npt.NDArray[np.int32]"
-    nspectra: "npt.NDArray[np.int32]"
-    sn_name: "npt.NDArray[np.str_]"
-    dphase: "npt.NDArray[np.float32]"
-    redshift: "npt.NDArray[np.float32]"
-    x0: "npt.NDArray[np.float32]"
-    x1: "npt.NDArray[np.float32]"
-    c: "npt.NDArray[np.float32]"
-    MB: "npt.NDArray[np.float32]"
-    hubble_residual: "npt.NDArray[np.float32]"
-    luminosity_distance: "npt.NDArray[np.float32]"
-    spectra_id: "npt.NDArray[np.str_]"
-    phase: "npt.NDArray[np.float32]"
-    wl_mask_min: "npt.NDArray[np.float32]"
-    wl_mask_max: "npt.NDArray[np.float32]"
-    amplitude: "npt.NDArray[np.float32]"
-    sigma: "npt.NDArray[np.float32]"
-    salt_flux: "npt.NDArray[np.float32]"
-    wavelength: "npt.NDArray[np.float32]"
-    mask: "npt.NDArray[np.int32]"
-    time: "npt.NDArray[np.float32]"
-
-
-class DataStep(SNPAEStep[DataStepConfig]):
+class DataStep(SNPAEStep):
     # Class Variables
     id: ClassVar[str] = "data"
 
-    def __init__(self, config: DataStepConfig) -> None:
+    def __init__(self, config: "DataStepConfig") -> None:
         # --- Superclass Variables ---
         self.options: DataStepConfig
         self.config: GlobalConfig
@@ -515,8 +490,8 @@ class DataStep(SNPAEStep[DataStepConfig]):
         spectra_params = {
             "spectra_id": ("id", np.str_("-" * max_id_len)),
             "phase": ("phase", np.float32(-100.0)),
-            "wl_mask_min": ("wl_mask_min", np.inf),
-            "wl_mask_max": ("wl_mask_max", -np.inf),
+            "wl_mask_min": ("wl_mask_min", np.float32(np.inf)),
+            "wl_mask_max": ("wl_mask_max", np.float32(-np.inf)),
         }
 
         for data_key, (spectra_key, padding) in spectra_params.items():

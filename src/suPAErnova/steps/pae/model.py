@@ -1,65 +1,41 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import TYPE_CHECKING, ClassVar, final, get_args, override
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING, ClassVar, override
+import importlib
 
 import numpy as np
-from pydantic import (  # noqa: TC002
-    BaseModel,
-    ConfigDict,
-    PositiveInt,
-    PositiveFloat,
-    NonNegativeFloat,
-)
 
-from suPAErnova.steps import SNPAEStep
-from suPAErnova.steps.data import DataStepResult  # noqa: TC001
+from suPAErnova.steps.backends import AbstractModel
+from suPAErnova.configs.steps.pae import PAEStage, PAEStepResult
 
 if TYPE_CHECKING:
     from logging import Logger
+    from pathlib import Path
+    from collections.abc import Callable
 
     from suPAErnova.steps.data import DataStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
+    from suPAErnova.configs.steps.data import DataStepResult
+    from suPAErnova.configs.steps.pae.model import PAEModelConfig
 
-    from .pae import Model, ModelConfig
+    from .tf import TFPAEModel
+    from .tch import TCHPAEModel
 
-
-class PAEStepResult(BaseModel):
-    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
-    name: str
-
-
-class Stage(BaseModel):
-    stage: PositiveInt
-    name: str
-    fname: str
-    savepath: Path | None = None
-    loadpath: Path | None = None
-
-    epochs: PositiveInt
-    debug: bool
-
-    learning_rate: PositiveFloat
-    learning_rate_decay_steps: PositiveInt
-    learning_rate_decay_rate: PositiveFloat
-    learning_rate_weight_decay_rate: PositiveFloat
-
-    train_data: DataStepResult
-    test_data: DataStepResult
-    val_data: DataStepResult
-
-    moving_means: list[float]
+    PAEModel = TFPAEModel | TCHPAEModel
 
 
-class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
+class PAEModelStep[Backend: str](AbstractModel[Backend]):
+    # --- Class Variables ---
+    model_backend: ClassVar[dict[str, "Callable[[], type[PAEModelConfig]]"]] = {
+        "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFPAEModel,
+        "PyTorch": lambda: importlib.import_module(".tch", __package__).TCHPAEModel,
+    }
     id: ClassVar[str] = "pae_model"
 
-    def __init__(self, config: C) -> None:
-        self.model: M
-
+    def __init__(self, config: "PAEModelConfig") -> None:
         # --- Superclass Variables ---
-        self.options: C
+        self.options: PAEModelConfig
         self.config: GlobalConfig
         self.paths: PathConfig
         self.log: Logger
@@ -80,19 +56,19 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.debug: bool
 
         # Optional
-        self.min_train_redshift: NonNegativeFloat
-        self.max_train_redshift: NonNegativeFloat
-        self.min_test_redshift: NonNegativeFloat
-        self.max_test_redshift: NonNegativeFloat
-        self.min_val_redshift: NonNegativeFloat
-        self.max_val_redshift: NonNegativeFloat
+        self.min_train_redshift: float
+        self.max_train_redshift: float
+        self.min_test_redshift: float
+        self.max_test_redshift: float
+        self.min_val_redshift: float
+        self.max_val_redshift: float
 
-        self.min_train_phase: NonNegativeFloat
-        self.max_train_phase: NonNegativeFloat
-        self.min_test_phase: NonNegativeFloat
-        self.max_test_phase: NonNegativeFloat
-        self.min_val_phase: NonNegativeFloat
-        self.max_val_phase: NonNegativeFloat
+        self.min_train_phase: float
+        self.max_train_phase: float
+        self.min_test_phase: float
+        self.max_test_phase: float
+        self.min_val_phase: float
+        self.max_val_phase: float
 
         # --- Previous Step Variables ---
         self.data: DataStep
@@ -105,34 +81,21 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.phase_dim: int
 
         # --- Setup Variables ---
-        self.stage_delta_av: Stage
-        self.stage_zs: list[Stage]
-        self.stage_delta_m: Stage
-        self.stage_delta_p: Stage
-        self.stage_final: Stage
-        self.run_stages: list[Stage]
-
-        # --- Output Variables ---
-        self.pae: PAEStepResult
-
-    def prep_model(self, *, force: bool = False) -> M:
-        if not force:
-            try:
-                return self.model
-            except AttributeError:
-                pass
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
-        return self.model
+        self.stage_delta_av: PAEStage
+        self.stage_zs: list[PAEStage]
+        self.stage_delta_m: PAEStage
+        self.stage_delta_p: PAEStage
+        self.stage_final: PAEStage
+        self.run_stages: list[PAEStage]
 
     @override
     def _setup(
         self,
         *,
         data: "DataStep",
-        train_data: DataStepResult,
-        test_data: DataStepResult,
-        val_data: DataStepResult,
+        train_data: "DataStepResult",
+        test_data: "DataStepResult",
+        val_data: "DataStepResult",
     ) -> None:
         # --- Config Variables ---
         # Required
@@ -172,7 +135,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.wl_dim = self.data.wl_dim
         self.phase_dim = 1
 
-        # --- Stages ---
+        # --- PAEStages ---
         stage_data = {
             "train_data": self.train_data,
             "test_data": self.test_data,
@@ -181,7 +144,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
             "debug": self.debug,
         }
 
-        self.stage_delta_av = Stage.model_validate({
+        self.stage_delta_av = PAEStage.model_validate({
             "stage": 1,
             "name": "ΔAᵥ",
             "fname": "delta_av",
@@ -195,7 +158,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
         z0 = 2 if self.physical_latents else 1
         self.stage_zs = [
-            Stage.model_validate({
+            PAEStage.model_validate({
                 "stage": z0 + i,
                 "name": f"z{i + 1}",
                 "fname": f"z{i + 1}",
@@ -209,7 +172,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
             for i in range(self.n_zs)
         ]
 
-        self.stage_delta_m = Stage.model_validate({
+        self.stage_delta_m = PAEStage.model_validate({
             "stage": z0 + self.n_zs,
             "name": "Δℳ",
             "fname": "delta_m",
@@ -221,7 +184,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
             **stage_data,
         })
 
-        self.stage_delta_p = Stage.model_validate({
+        self.stage_delta_p = PAEStage.model_validate({
             "stage": z0 + self.n_zs + 1,
             "name": "Δ𝓅",
             "fname": "delta_p",
@@ -233,7 +196,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
             **stage_data,
         })
 
-        self.stage_final = Stage.model_validate({
+        self.stage_final = PAEStage.model_validate({
             "stage": self.n_pae_latents,
             "name": "Final",
             "fname": "final",
@@ -258,7 +221,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _completed(self) -> bool:
-        self.prep_model()
+        self._model()
         final_stage = self.run_stages[-1]
         final_savepath = (
             self.paths.out / self.model.name / final_stage.fname / self.model.model_path
@@ -273,7 +236,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _load(self) -> None:
-        self.prep_model()
+        self._model()
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -286,8 +249,8 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
     def _run(self) -> None:
         savepath: Path | None = None
         for i, stage in enumerate(self.run_stages):
-            self.prep_model(force=True)
-            self.log.debug(f"Starting Stage {i}: {stage.name}")
+            self._model(force=True)
+            self.log.debug(f"Starting PAEStage {i}: {stage.name}")
             if savepath is not None:
                 stage.loadpath = savepath
             savepath = self.paths.out / self.model.name / stage.fname
@@ -306,7 +269,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _result(self) -> None:
-        self.prep_model()
+        self._model()
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
         final_savepath = self.paths.out / self.model.name / final_stage.fname
@@ -316,7 +279,7 @@ class PAEModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
         self.log.debug("Calculating pae results")
         results = {"name": self.model.name}
-        self.pae = PAEStepResult.model_validate(results)
+        self.results = PAEStepResult.model_validate(results)
 
     @override
     def _analyse(self) -> None:

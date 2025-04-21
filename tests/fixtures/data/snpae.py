@@ -9,7 +9,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Callable
 
-    from suPAErnova.steps.data import DataStep, DataStepResult
+    from suPAErnova.steps.data import DataStep
+    from suPAErnova.configs.steps.data import DataStepResult
 
 
 @pytest.fixture(scope="session")

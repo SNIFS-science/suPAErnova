@@ -1,31 +1,35 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import TYPE_CHECKING, Literal, ClassVar, get_args, override
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING, Literal, ClassVar, override
+import importlib
 
-from pydantic import BaseModel, PositiveInt  # noqa: TC002
+from pydantic import BaseModel
 
-from suPAErnova.steps import SNPAEStep
-from suPAErnova.steps.data import DataStepResult  # noqa: TC001
+from suPAErnova.steps.backends import AbstractModel
 
 if TYPE_CHECKING:
     from logging import Logger
+    from pathlib import Path
+    from collections.abc import Callable
 
-    from suPAErnova.steps.nflow import (
-        Model as NFLOW,
-        ModelConfig as NFLOWConfig,
-    )
+    from pydantic import PositiveInt
+
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.steps.nflow.model import NFlowModel
+    from suPAErnova.configs.steps.data import DataStepResult
+    from suPAErnova.configs.steps.posterior.model import PosteriorModelConfig
 
-    from .posterior import Model, ModelConfig
+    from .tf import TFPosteriorModel
+    from .tch import TCHPosteriorModel
+
+    PosteriorModel = TFPosteriorModel | TCHPosteriorModel
 
 InitVars = Literal["init", "random", "data", "scale", "trivial"]
 
 
 class Stage(BaseModel):
-    stage: PositiveInt
+    stage: "PositiveInt"
     name: str
     fname: str
     savepath: "Path | None" = None
@@ -35,9 +39,9 @@ class Stage(BaseModel):
 
     n_chains: int
 
-    train_data: DataStepResult
-    test_data: DataStepResult
-    val_data: DataStepResult
+    train_data: "DataStepResult"
+    test_data: "DataStepResult"
+    val_data: "DataStepResult"
 
     init_latents: "InitVars"
     init_delta_av: "InitVars"
@@ -46,14 +50,21 @@ class Stage(BaseModel):
     init_bias: "InitVars"
 
 
-class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
+class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
+    # --- Class Variables ---
+    model_backend: ClassVar[dict[str, "Callable[[], type[PosteriorModel]]"]] = {
+        "TensorFlow": lambda: importlib.import_module(
+            ".tf", __package__
+        ).TFPosteriorModel,
+        "PyTorch": lambda: importlib.import_module(
+            ".tch", __package__
+        ).TCHPosteriorModel,
+    }
     id: ClassVar[str] = "posterior_model"
 
-    def __init__(self, config: C) -> None:
-        self.model: M
-
+    def __init__(self, config: "PosteriorModelConfig") -> None:
         # --- Superclass Variables ---
-        self.options: C
+        self.options: PosteriorModelConfig
         self.config: "GlobalConfig"
         self.paths: "PathConfig"
         self.log: "Logger"
@@ -66,7 +77,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.savepath: "Path"
 
         # --- Previous Step Variables ---
-        self.nflow: "NFlowModel[NFLOW, NFLOWConfig]"
+        self.nflow: NFlowModel
         self.train_data: DataStepResult
         self.test_data: DataStepResult
         self.val_data: DataStepResult
@@ -82,22 +93,8 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.stage_final: Stage
         self.run_stages: list[Stage]
 
-    def prep_model(self, *, force: bool = False) -> M:
-        if not force:
-            try:
-                return self.model
-            except AttributeError:
-                pass
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
-        return self.model
-
     @override
-    def _setup(
-        self,
-        *,
-        nflow: "NFlowModel[NFLOW, NFLOWConfig]",
-    ) -> None:
+    def _setup(self, *, nflow: "NFlowModel") -> None:
         self.debug = self.options.debug
 
         self.nflow = nflow
@@ -113,7 +110,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.test_data = self.nflow.pae.test_data
         self.val_data = self.nflow.pae.val_data
 
-        self.prep_model()
+        self._model()
         self.savepath = self.paths.out / self.model.name
 
         # --- Stages ---
@@ -180,7 +177,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _completed(self) -> bool:
-        self.prep_model()
+        self._model()
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -195,7 +192,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _load(self) -> None:
-        self.prep_model()
+        self._model()
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -206,7 +203,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _run(self) -> None:
-        self.prep_model()
+        self._model()
         savepath: Path | None = None
         for i, stage in enumerate(self.run_stages):
             self.log.debug(f"Starting Stage {i}: {stage.name}")
@@ -228,7 +225,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _result(self) -> None:
-        self.prep_model()
+        self._model()
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -239,20 +236,7 @@ class PosteriorModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _analyse(self) -> None:
-        print(self.model.built, self.model.trained)
-        self.prep_model()
-        print(
-            self.model.best_zs,
-            self.model.best_latents,
-            self.model.best_delta_av,
-            self.model.best_delta_m,
-            self.model.best_delta_p,
-            self.model.best_bias,
-            self.model.best_chain,
-            self.model.best_converged,
-            self.model.best_objective_value,
-            self.model.num_evals,
-        )
+        pass
 
     #
     # === Posterior Specific Functions ===

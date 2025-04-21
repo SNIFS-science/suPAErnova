@@ -2,17 +2,11 @@
 from typing import TYPE_CHECKING, ClassVar, override
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict
 
-from suPAErnova.steps import SNPAEStep
-from suPAErnova.steps.data import DataStepResult
-from suPAErnova.configs.steps.pae import PAEStepConfig
-from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
-from suPAErnova.configs.steps.pae.tch import TCHPAEModelConfig
+from suPAErnova.steps.model import AbstractModelStep
+from suPAErnova.configs.steps.data import DataStepResult
 
-from .tf import TFPAEModel
-from .tch import TCHPAEModel
-from .model import PAEModel
+from .model import PAEModelStep
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -22,24 +16,16 @@ if TYPE_CHECKING:
     from suPAErnova.steps.data import DataStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
-
-    from .model import PAEStepResult
-
-ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
-Model = TFPAEModel | TCHPAEModel
-ModelMap: dict[type[ModelConfig], type[Model]] = {
-    TFPAEModelConfig: TFPAEModel,
-    TCHPAEModelConfig: TCHPAEModel,
-}
+    from suPAErnova.configs.steps.pae import PAEStepConfig
 
 
-class PAEStep(SNPAEStep[PAEStepConfig]):
-    # Class Variables
+class PAEStep[Backend: str](AbstractModelStep[Backend, PAEModelStep[Backend]]):
+    # --- Class Variables ---
     id: ClassVar[str] = "pae"
 
-    def __init__(self, config: PAEStepConfig) -> None:
+    def __init__(self, config: "PAEStepConfig[Backend]") -> None:
         # --- Superclass Variables ---
-        self.options: PAEStepConfig
+        self.options: PAEStepConfig[Backend]
         self.config: GlobalConfig
         self.paths: PathConfig
         self.log: Logger
@@ -52,7 +38,6 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
         self.validation_frac: PositiveFloat
 
         # --- Setup Variables ---
-        self.pae_models: list[PAEModel[Model, ModelConfig]]
         self.train_data: list[DataStepResult]
         self.test_data: list[DataStepResult]
         self.val_data: list[DataStepResult]
@@ -62,21 +47,15 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
         self.seed: int = self.options.seed
         self.rng: np.random.Generator = np.random.default_rng(self.seed)
 
-        # --- Output Variables ---
-        self.pae: list[PAEStepResult]
-
     @override
     def _setup(self, *, data: "DataStep") -> None:
+        super()._setup()
+
         # --- Previous Step Variables ---
         self.data = data
         self.validation_frac = self.options.validation_frac
 
         # --- Models ---
-        self.pae_models = [
-            PAEModel[ModelMap[model.__class__], model.__class__](model)
-            for model in self.options.models
-        ]
-        self.n_models = len(self.pae_models)
         self.n_kfolds = self.data.n_kfolds
         self.log.debug(
             f"Training {self.n_models} models across {self.n_kfolds} kfolds."
@@ -118,39 +97,13 @@ class PAEStep(SNPAEStep[PAEStepConfig]):
             : self.n_models
         ]
 
-        for i, pae_model in enumerate(self.pae_models):
-            pae_model.setup(
+        for i, model in enumerate(self.models):
+            model.setup(
                 data=self.data,
                 train_data=self.train_data[i],
                 test_data=self.test_data[i],
                 val_data=self.val_data[i],
             )
-
-    @override
-    def _completed(self) -> bool:
-        return all(pae_model.completed() for pae_model in self.pae_models)
-
-    @override
-    def _load(self) -> None:
-        for pae_model in self.pae_models:
-            pae_model.load()
-        self.pae = [pae_model.pae for pae_model in self.pae_models]
-
-    @override
-    def _run(self) -> None:
-        for pae_model in self.pae_models:
-            pae_model.run()
-
-    @override
-    def _result(self) -> None:
-        for pae_model in self.pae_models:
-            pae_model.result()
-        self.pae = [pae_model.pae for pae_model in self.pae_models]
-
-    @override
-    def _analyse(self) -> None:
-        for pae_model in self.pae_models:
-            pae_model.analyse()
 
 
 PAEStep.register_step()

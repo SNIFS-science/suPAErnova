@@ -1,6 +1,6 @@
 [data]
     # Required
-    data_dir = "../../../../suPAErnova_data"
+    data_dir = "../../../../data/"
     idr      = "IDR_eTmax.txt"
     mask     = "mask_info_wmin_wmax.txt"
     meta     = "meta.csv"

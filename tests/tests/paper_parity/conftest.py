@@ -7,8 +7,10 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Callable
 
-    from suPAErnova.steps.data import DataStepResult
-    from suPAErnova.steps.pae.model import PAEStepResult
+    from suPAErnova.configs.steps.pae import PAEStepResult
+    from suPAErnova.configs.steps.data import DataStepResult
+
+pytestmark = pytest.mark.paper_parity
 
 # --- Data Step ---
 

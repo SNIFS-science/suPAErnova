@@ -1,33 +1,37 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import TYPE_CHECKING, ClassVar, final, get_args, override
+from typing import TYPE_CHECKING, ClassVar, override
+import importlib
 
-from suPAErnova.steps import SNPAEStep
+from suPAErnova.steps.backends import AbstractModel
 
 if TYPE_CHECKING:
     from logging import Logger
     from pathlib import Path
+    from collections.abc import Callable
 
-    from suPAErnova.steps.pae import (
-        Model as PAE,
-        ModelConfig as PAEConfig,
-    )
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.steps.pae.model import PAEModel
-    from suPAErnova.configs.steps.nflow import ModelConfig
+    from suPAErnova.configs.steps.nflow.model import NFlowModelConfig
 
-    from .nflow import Model
+    from .tf import TFNFlowModel
+    from .tch import TCHNFlowModel
+
+    NFlowModel = TFNFlowModel | TCHNFlowModel
 
 
-class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
+class NFlowModelStep[Backend: str](AbstractModel[Backend]):
+    # --- Class Variables ---
+    model_backend: ClassVar[dict[str, "Callable[[], type[NFlowModel]]"]] = {
+        "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFNflowModel,
+        "PyTorch": lambda: importlib.import_module(".tch", __package__).TCHNFlowModel,
+    }
     id: ClassVar[str] = "nflow_model"
 
-    def __init__(self, config: C) -> None:
-        self.model: M
-
+    def __init__(self, config: "NFlowModelConfig") -> None:
         # --- Superclass Variables ---
-        self.options: C
+        self.options: NFlowModelConfig
         self.config: GlobalConfig
         self.paths: PathConfig
         self.log: Logger
@@ -39,36 +43,21 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
         self.debug: bool
         self.savepath: Path
 
-        # --- Previous Step Variables ---
-        self.pae: PAEModel[PAE, PAEConfig]
-
-    def prep_model(self, *, force: bool = False) -> M:
-        if not force:
-            try:
-                return self.model
-            except AttributeError:
-                pass
-        model_cls = get_args(self.__orig_class__)[0]
-        self.model = model_cls(self)
-        return self.model
+        self.pae: PAEModel
 
     @override
-    def _setup(
-        self,
-        *,
-        pae: "PAEModel[PAE, PAEConfig]",
-    ) -> None:
+    def _setup(self, *, pae: "PAEModel") -> None:
         self.debug = self.options.debug
 
         self.pae = pae
         self.pae.load()
 
-        self.prep_model()
+        self._model()
         self.savepath = self.paths.out / self.model.name
 
     @override
     def _completed(self) -> bool:
-        self.prep_model()
+        self._model()
         savepath = self.savepath / self.model.model_path
 
         if not savepath.exists():
@@ -80,14 +69,14 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _load(self) -> None:
-        self.prep_model()
+        self._model()
 
         self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
         self.model.load_checkpoint(self.savepath)
 
     @override
     def _run(self) -> None:
-        self.prep_model()
+        self._model()
         model_path = self.savepath / self.model.model_path
         weights_path = self.savepath / self.model.weights_path
         if model_path.exists() and not self.force:
@@ -100,7 +89,7 @@ class NFlowModel[M: "Model", C: "ModelConfig"](SNPAEStep[C]):
 
     @override
     def _result(self) -> None:
-        self.prep_model()
+        self._model()
         self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
         self.model.save_checkpoint(self.savepath)
 

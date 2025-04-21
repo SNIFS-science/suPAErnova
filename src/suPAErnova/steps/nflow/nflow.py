@@ -1,15 +1,8 @@
-from typing import TYPE_CHECKING, ClassVar, get_args, override
+from typing import TYPE_CHECKING, Any, ClassVar, override
 
-from suPAErnova.steps import SNPAEStep
-from suPAErnova.steps.pae.tf import TFPAEModel
-from suPAErnova.steps.pae.tch import TCHPAEModel
-from suPAErnova.configs.steps.nflow import NFlowStepConfig
-from suPAErnova.configs.steps.nflow.tf import TFNFlowModelConfig
-from suPAErnova.configs.steps.nflow.tch import TCHNFlowModelConfig
+from suPAErnova.steps.model import AbstractModelStep
 
-from .tf import TFNFlowModel
-from .tch import TCHNFlowModel
-from .model import NFlowModel
+from .model import NFlowModelStep
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -17,27 +10,16 @@ if TYPE_CHECKING:
     from suPAErnova.steps.pae import PAEStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
-
-ModelConfig = TFNFlowModelConfig | TCHNFlowModelConfig
-Model = TFNFlowModel | TCHNFlowModel
-PAE = TFPAEModel | TCHPAEModel
-ModelMap: dict[type[ModelConfig], type[Model]] = {
-    TFNFlowModelConfig: TFNFlowModel,
-    TCHNFlowModelConfig: TCHNFlowModel,
-}
-CompatabilityMap: dict[type[ModelConfig], type[PAE]] = {
-    TFNFlowModelConfig: TFPAEModel,
-    TCHNFlowModelConfig: TCHPAEModel,
-}
+    from suPAErnova.configs.steps.nflow import NFlowStepConfig
 
 
-class NFlowStep(SNPAEStep[NFlowStepConfig]):
+class NFlowStep[Backend: str](AbstractModelStep[Backend, NFlowModelStep[Backend]]):
     # Class Variables
     id: ClassVar[str] = "nflow"
 
-    def __init__(self, config: NFlowStepConfig) -> None:
+    def __init__(self, config: "NFlowStepConfig[Backend]") -> None:
         # --- Superclass Variables ---
-        self.options: NFlowStepConfig
+        self.options: NFlowStepConfig[Backend]
         self.config: GlobalConfig
         self.paths: PathConfig
         self.log: Logger
@@ -46,58 +28,16 @@ class NFlowStep(SNPAEStep[NFlowStepConfig]):
         super().__init__(config)
 
         # --- Previous Step Variables ---
-        self.pae: PAEStep
-
-        # --- Setup Variables ---
-        self.nflow_models: list[NFlowModel[Model, ModelConfig]] = []
+        self.pae: PAEStep[Any]
 
     @override
-    def _setup(self, *, pae: "PAEStep") -> None:
+    def _setup(self, *, pae: "PAEStep[Any]") -> None:
         # --- Previous Step Variables ---
         self.pae = pae
 
         # --- Models ---
-        for model in self.options.models:
-            compat_pae_models = [
-                pae_model
-                for pae_model in self.pae.pae_models
-                if get_args(pae_model.__orig_class__)[0]
-                == CompatabilityMap[model.__class__]
-            ]
-            if len(compat_pae_models) == 0:
-                err = f"{self.name} has no compatable PAE models with backend: {CompatabilityMap[model.__class__]}"
-                raise ValueError(err)
-
-            for pae_model in compat_pae_models:
-                nflow_model = NFlowModel[ModelMap[model.__class__], model.__class__](
-                    model
-                )
-                nflow_model.setup(pae=pae_model)
-                self.nflow_models.append(nflow_model)
-
-    @override
-    def _completed(self) -> bool:
-        return all(nflow_model.completed() for nflow_model in self.nflow_models)
-
-    @override
-    def _load(self) -> None:
-        for nflow_model in self.nflow_models:
-            nflow_model.load()
-
-    @override
-    def _run(self) -> None:
-        for nflow_model in self.nflow_models:
-            nflow_model.run()
-
-    @override
-    def _result(self) -> None:
-        for nflow_model in self.nflow_models:
-            nflow_model.result()
-
-    @override
-    def _analyse(self) -> None:
-        for nflow_model in self.nflow_models:
-            nflow_model.analyse()
+        for i, model in enumerate(self.models):
+            model.setup(pae=self.pae.models[i])
 
 
 NFlowStep.register_step()

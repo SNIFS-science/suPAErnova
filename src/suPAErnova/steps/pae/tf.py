@@ -23,9 +23,10 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
+    from suPAErnova.configs.steps.pae import PAEStage
     from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
 
-    from .model import Stage, PAEModel
+    from .model import PAEModelStep
 
     # === Custom Types ===
     S = Literal
@@ -563,13 +564,13 @@ class TFPAEDecoder(ks.layers.Layer):
 class TFPAEModel(ks.Model):
     def __init__(
         self,
-        config: "PAEModel[TFPAEModel, TFPAEModelConfig]",
+        config: "PAEModelStep[TFPAEModelConfig]",
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
         super().__init__(*args, name=f"{config.name.split()[-1]}PAEModel", **kwargs)
         # --- Config ---
-        options = cast("TFPAEModelConfig", config.options)
+        options = config.options
         self.log: "Logger" = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
@@ -605,7 +606,7 @@ class TFPAEModel(ks.Model):
         self._optimiser: type[ks.optimizers.Optimizer] = options.optimiser_cls
         self._loss: ks.losses.Loss = options.loss_cls()
 
-        self.stage: Stage
+        self.stage: PAEStage
         self.latents_z_mask: "ITensor[S['n_pae_latents']]"
         self.latents_physical_mask: "ITensor[S['n_pae_latents']]"
 
@@ -888,8 +889,8 @@ class TFPAEModel(ks.Model):
 
     def train_model(
         self,
-        stage: "Stage",
-    ) -> ks.callbacks.History:
+        stage: "PAEStage",
+    ) -> None:
         self.stage = stage
 
         # === Setup Callbacks ===
@@ -932,7 +933,7 @@ class TFPAEModel(ks.Model):
 
         # === Train ===
         self._epoch = 0
-        return self.fit(
+        self.fit(
             x=data,
             y=prep,
             initial_epoch=self._epoch,

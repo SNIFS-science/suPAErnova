@@ -17,9 +17,9 @@ if TYPE_CHECKING:
     from suPAErnova.configs.globals import GlobalConfig
 
 
-class SNPAEStep[Config: "StepConfig"]:
+class SNPAEStep:
     # Class Variables
-    steps: ClassVar[dict[str, type["SNPAEStep[Any]"]]] = {}
+    steps: ClassVar[dict[str, type["SNPAEStep"]]] = {}
     id: ClassVar[str]
 
     @classmethod
@@ -35,7 +35,7 @@ class SNPAEStep[Config: "StepConfig"]:
             if is_pkg:
                 importlib.import_module(f"{base_name}.{module}")
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: "StepConfig") -> None:
         # Class Variables
         self.__class__.id = config.__class__.id
         self.name: str = (
@@ -45,7 +45,7 @@ class SNPAEStep[Config: "StepConfig"]:
         ).replace("Config", "")
 
         # Init Variables
-        self.options: Config = config
+        self.options: StepConfig = config
         self.config: GlobalConfig = config.config
         self.paths: PathConfig = config.paths
         self.log: Logger = config.log

@@ -1,75 +1,65 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, ClassVar, Annotated, get_args
+from typing import ClassVar, Annotated
+from pathlib import Path
+import importlib
+from collections.abc import Callable
 
 from pydantic import (
     Field,
-    model_validator,
+    BaseModel,
+    PositiveInt,
+    PositiveFloat,
 )
 
 from suPAErnova.steps.data import DataStep
-from suPAErnova.configs.steps import StepConfig
-from suPAErnova.configs.steps.data import DataStepConfig
+from suPAErnova.configs.steps.data import DataStepConfig, DataStepResult
+from suPAErnova.configs.steps.model import AbstractModelStepConfig
 
-from .tf import TFPAEModelConfig
-from .tch import TCHPAEModelConfig
-from .model import TFBackend, TCHBackend
-
-ModelConfig = TFPAEModelConfig | TCHPAEModelConfig
+from .model import PAEModelConfig
 
 
-class PAEStepConfig(StepConfig):
+class PAEStage(BaseModel):
+    stage: PositiveInt
+    name: str
+    fname: str
+    savepath: Path | None = None
+    loadpath: Path | None = None
+
+    epochs: PositiveInt
+    debug: bool
+
+    learning_rate: PositiveFloat
+    learning_rate_decay_steps: PositiveInt
+    learning_rate_decay_rate: PositiveFloat
+    learning_rate_weight_decay_rate: PositiveFloat
+
+    train_data: DataStepResult
+    test_data: DataStepResult
+    val_data: DataStepResult
+
+    moving_means: list[float]
+
+
+class PAEStepResult(BaseModel):
+    name: str
+
+
+class PAEStepConfig[Backend: str](AbstractModelStepConfig[Backend, PAEModelConfig]):
     # --- Class Variables ---
+    model_backend: ClassVar[dict[str, Callable[[], type[PAEModelConfig]]]] = {
+        "TensorFlow": lambda: importlib.import_module(
+            ".tf", __package__
+        ).TFPAEModelConfig,
+        "PyTorch": lambda: importlib.import_module(
+            ".tch", __package__
+        ).TCHPAEModelConfig,
+    }
     id: ClassVar[str] = "pae"
     required_steps: ClassVar[list[str]] = [DataStepConfig.id]
 
     # --- Previous Steps ---
     data: DataStep | None = None
     validation_frac: Annotated[float, Field(ge=0, le=1)]
-
-    # --- Models ---
-    model: ModelConfig
-    models: list[ModelConfig] = Field(validation_alias="variant")
-
-    @model_validator(mode="before")
-    @classmethod
-    def prep_model_config(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "model" not in data:
-                err = f"No Base Model has been defined. Please define one in [{cls.id}.model]"
-                raise ValueError(err)
-
-            default_model_config = {
-                "paths": data.get("paths"),
-                "config": data.get("config"),
-                "log": data.get("log"),
-            }
-            base_model_config = {**default_model_config, **data.get("model", {})}
-            data["model"] = base_model_config
-
-            pae_model_configs = [
-                data["model"],
-                *[
-                    {**base_model_config, **model_config}
-                    for model_config in data.get("variant", [])
-                ],
-            ]
-            data.pop("variant", None)
-            data["variant"] = []
-            for i, pae_model_config in enumerate(pae_model_configs):
-                backend = pae_model_config.get("backend")
-                if backend is None:
-                    err = f"{'Base' if i == 0 else f'Variant {i}'} Model is missing a backend key. Please choose from {get_args(TFBackend)} for TensorFlow or {get_args(TCHBackend)} for PyTorch"
-                    raise ValueError(err)
-                if backend in get_args(TFBackend):
-                    model_config_cls = TFPAEModelConfig
-                elif pae_model_config.get("backend") in get_args(TCHBackend):
-                    model_config_cls = TCHPAEModelConfig
-                else:
-                    err = f"Unknown backend: {backend}. Please choose from {get_args(TFBackend)} for TensorFlow or {get_args(TCHBackend)} for PyTorch"
-                    raise ValueError(err)
-                model_config = model_config_cls.from_config(pae_model_config)
-                data["variant"].append(model_config)
-        return data
 
     # --- Optional ---
     seed: int = 12345
