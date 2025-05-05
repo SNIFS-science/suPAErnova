@@ -4,6 +4,8 @@ from pathlib import Path
 import importlib
 from collections.abc import Callable
 
+import numpy as np
+from numpy import typing as npt
 from pydantic import (
     Field,
     BaseModel,
@@ -14,6 +16,7 @@ from pydantic import (
 from suPAErnova.steps.data import DataStep
 from suPAErnova.configs.steps.data import DataStepConfig, DataStepResult
 from suPAErnova.configs.steps.model import AbstractModelStepConfig
+from suPAErnova.configs.steps.steps import AbstractStepResult
 
 from .model import PAEModelConfig
 
@@ -40,8 +43,22 @@ class PAEStage(BaseModel):
     moving_means: list[float]
 
 
-class PAEStepResult(BaseModel):
-    name: str
+class PAEStepResult(AbstractStepResult):
+    stage: int
+
+    ind: "npt.NDArray[np.int32]"
+    sn_name: "npt.NDArray[np.str_]"
+    spectra_id: "npt.NDArray[np.str_]"
+
+    latents: "npt.NDArray[np.float32]"
+    output_amp: "npt.NDArray[np.float32]"
+
+    loss: float
+    pred_loss: float
+    model_loss: float
+    resid_loss: float
+    delta_loss: float
+    cov_loss: float
 
 
 class PAEStepConfig[Backend: str](AbstractModelStepConfig[Backend, PAEModelConfig]):
@@ -62,7 +79,7 @@ class PAEStepConfig[Backend: str](AbstractModelStepConfig[Backend, PAEModelConfi
     validation_frac: Annotated[float, Field(ge=0, le=1)]
 
     # --- Optional ---
-    seed: int = 12345
+    seed: int
 
 
 PAEStepConfig.register_step()

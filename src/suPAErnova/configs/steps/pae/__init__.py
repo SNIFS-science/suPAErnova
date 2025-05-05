@@ -1,3 +1,3 @@
-from .pae import PAEStage, PAEStepConfig, PAEStepResult, PAEModelConfig
+from .pae import PAEStage, PAEStepConfig, PAEStepResult
 
-__all__ = ("PAEModelConfig", "PAEStage", "PAEStepConfig", "PAEStepResult")
+__all__ = ("PAEStage", "PAEStepConfig", "PAEStepResult")

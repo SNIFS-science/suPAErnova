@@ -8,7 +8,7 @@ import pytest
 from astropy import cosmology as cosmo
 import sncosmo
 
-from suPAErnova.steps.data import DataStepResult
+from suPAErnova.configs.steps.data import DataStepResult
 
 if TYPE_CHECKING:
     from typing import Any
@@ -45,6 +45,19 @@ def legacy_data_step(data_params: dict[str, "Any"]) -> dict[str, "Any"]:
     # Print statements have been removed
     # Plotting has been removed
     # Unused variables have been removed
+
+    # Used cached result if it exists.
+    savepath = (
+        data_params["cache_path"]
+        / data_params["fname"]
+        / "data"
+        / "legacy"
+        / "data_step.npz"
+    )
+    savepath.parent.mkdir(parents=True, exist_ok=True)
+    if savepath.exists():
+        with np.load(savepath, allow_pickle=True) as io:
+            return dict(io)
 
     # Variation: `data_dir` points to tests data path
     data_dir = str(data_params["data_path"])
@@ -159,8 +172,9 @@ def legacy_data_step(data_params: dict[str, "Any"]) -> dict[str, "Any"]:
 
     # Variation: Removed unused optional params, made params which are always passed required
     # Variation: Precompute some values (including snmodel) which were unecessarily computed every run
+    cosmology = getattr(cosmo, data_params["cosmological_model"])
     zref = 0.05
-    zref_dist = cosmo.WMAP7.luminosity_distance(zref)
+    zref_dist = cosmology.luminosity_distance(zref)
 
     # Variation: salt2-4 -> salt2-k21-frag
     # Variation: Make path relative to user home (~)
@@ -183,7 +197,7 @@ def legacy_data_step(data_params: dict[str, "Any"]) -> dict[str, "Any"]:
         snmodel.set(x0=x0, x1=x1, c=c)
         return (
             snmodel.flux(phase=tobs, wave=wavelength)
-            * (cosmo.WMAP7.luminosity_distance(z) / zref_dist) ** 2
+            * (cosmology.luminosity_distance(z) / zref_dist) ** 2
             * (1 + z)
             / (1 + zref)
             * 1e15
@@ -346,7 +360,7 @@ def legacy_data_step(data_params: dict[str, "Any"]) -> dict[str, "Any"]:
     data_out["times_orig"] = data_out["times"].copy()
     time_normalizer = time_normalization(data_out["times_orig"])
     data_out["times"] = time_normalizer.scale(data_out["times"])
-    data_out["luminosity_distance"] = cosmo.WMAP7.luminosity_distance(
+    data_out["luminosity_distance"] = cosmology.luminosity_distance(
         data_out["redshift"],
     ).value
 
@@ -376,7 +390,46 @@ def legacy_data_step(data_params: dict[str, "Any"]) -> dict[str, "Any"]:
     config["wl_mask_min"][config["wl_mask_min"] == -1] = np.inf
     config["wl_mask_max"][config["wl_mask_max"] == -1] = -np.inf
 
-    return config
+    # The following is taken from `make_datasets/make_train_test_data.py`
+    test_frac = 1 - data_params["train_frac"]
+    nkfold = int(1.0 / test_frac)
+    ind_split = int(n_sn * data_params["train_frac"])
+    np.random.seed(data_params["seed"])
+    inds = np.arange(n_sn)
+    np.random.shuffle(inds)
+    for kfold in range(nkfold):
+        inds_k = np.roll(inds, kfold * inds.shape[0] // nkfold)
+        inds_train = inds_k[:ind_split]
+        inds_test = inds_k[ind_split:]
+        train_data = {}
+        test_data = {}
+        for k, v in data_out.items():
+            if v.shape[0] != n_sn:
+                train_data[k] = v
+                test_data[k] = v
+            else:
+                train_data[k] = v[inds_train]
+                test_data[k] = v[inds_test]
+
+        # Variation: Savepath
+        # Variation: save -> savez_compressed
+        kfold_train_savepath = (
+            savepath.parent / "train" / f"kfold{kfold:d}{savepath.suffix}"
+        )
+        kfold_test_savepath = (
+            savepath.parent / "test" / f"kfold{kfold:d}{savepath.suffix}"
+        )
+
+        kfold_train_savepath.parent.mkdir(parents=True, exist_ok=True)
+        kfold_test_savepath.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(kfold_train_savepath, **train_data)
+        np.savez_compressed(kfold_test_savepath, **test_data)
+
+    # Variation: Savepath
+    # Variation: save -> savez_compressed
+    np.savez_compressed(savepath, **config)
+    with np.load(savepath, allow_pickle=True) as io:
+        return dict(io)
 
 
 @pytest.fixture(scope="session")

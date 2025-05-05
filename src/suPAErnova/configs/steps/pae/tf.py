@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Concatenate, cast, override
+from typing import Any, Concatenate, cast, override
 from functools import cached_property
 from collections.abc import Callable
 
@@ -6,6 +6,10 @@ from pydantic import PositiveFloat, computed_field
 import tensorflow as tf
 from tensorflow import keras as ks
 
+from suPAErnova.steps.pae.tf import (
+    TFPAEModel,
+    loss as snpae_losses,
+)
 from suPAErnova.configs.steps import ConfigInputObject, validate_object
 
 from .model import PAEModelConfig
@@ -55,10 +59,14 @@ def validate_optimiser(
 def validate_loss(
     loss: ConfigInputObject[LossObject],
 ):
-    try:
-        return validate_object(loss, dummy_obj=ks.losses.Loss, mod=ks.losses)
-    except ValueError:
-        return validate_object(loss, dummy_obj=ks.losses.mae, mod=ks.losses)
+    err = f"Could not validate loss: {loss}:\n"
+    for dummy_obj in (ks.losses.Loss, ks.losses.mae):
+        for mod in (ks.losses, snpae_losses):
+            try:
+                return validate_object(loss, dummy_obj=dummy_obj, mod=mod)
+            except ValueError as e:
+                err += f"{e}\n"
+    raise ValueError(err)
 
 
 class TFPAEModelConfig(PAEModelConfig):
@@ -142,12 +150,13 @@ class TFPAEModelConfig(PAEModelConfig):
     @cached_property
     def loss_cls(self) -> type[ks.losses.Loss]:
         loss = validate_loss(self.loss)
+
         if isinstance(loss, type):
-            return loss
+            loss = loss()
 
         class CustomLoss(ks.losses.Loss):
             @override
             def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
-                return loss(y_true, y_pred)
+                return loss(y_true, y_pred, model=self.model)
 
         return CustomLoss

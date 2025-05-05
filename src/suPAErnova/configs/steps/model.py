@@ -3,6 +3,8 @@ from collections.abc import Callable
 
 from pydantic import (
     Field,
+    BaseModel,
+    ConfigDict,
     model_validator,
 )
 

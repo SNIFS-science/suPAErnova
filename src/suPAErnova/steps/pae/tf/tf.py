@@ -23,10 +23,9 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
+    from suPAErnova.steps.pae.model import PAEModelStep
     from suPAErnova.configs.steps.pae import PAEStage
     from suPAErnova.configs.steps.pae.tf import TFPAEModelConfig
-
-    from .model import PAEModelStep
 
     # === Custom Types ===
     S = Literal
@@ -94,7 +93,6 @@ if TYPE_CHECKING:
 
     ModelInputs = tuple[
         FTensor[S["batch_dim nspec_dim phase_dim"]],  # phase
-        FTensor[S["batch_dim nspec_dim phase_dim"]],  # dphase
         FTensor[S["batch_dim nspec_dim wl_dim"]],  # amp
         FTensor[S["batch_dim nspec_dim wl_dim"]],  # damp
         ITensor[S["batch_dim nspec_dim wl_dim"]],  # mask
@@ -564,68 +562,72 @@ class TFPAEDecoder(ks.layers.Layer):
 class TFPAEModel(ks.Model):
     def __init__(
         self,
-        config: "PAEModelStep[TFPAEModelConfig]",
+        config: "PAEModelStep[Literal['tf']]",
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
         super().__init__(*args, name=f"{config.name.split()[-1]}PAEModel", **kwargs)
         # --- Config ---
-        options = config.options
+        self.options: "TFPAEModelConfig" = cast("TFPAEModelConfig", config.options)
         self.log: "Logger" = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
 
         # --- Latent Dimensions ---
-        self.physical_latents: bool = options.physical_latents
-        self.n_physical: "Literal[0, 3]" = 3 if options.physical_latents else 0
-        self.n_zs: int = options.n_z_latents
+        self.physical_latents: bool = self.options.physical_latents
+        self.n_physical: "Literal[0, 3]" = 3 if self.options.physical_latents else 0
+        self.n_zs: int = self.options.n_z_latents
         self.n_pae_latents: int = self.n_physical + self.n_zs
 
         # --- Layers ---
-        self.encoder: TFPAEEncoder = TFPAEEncoder(options, config.name)
-        self.decoder: TFPAEDecoder = TFPAEDecoder(options, config.name)
+        self.encoder: TFPAEEncoder = TFPAEEncoder(self.options, config.name)
+        self.decoder: TFPAEDecoder = TFPAEDecoder(self.options, config.name)
         self.decoder.wl_dim = config.wl_dim
 
         # --- Training ---
         self.built: bool = False
         self._epoch: int = 0
-        self.batch_size: int = options.batch_size
-        self.save_best: bool = options.save_best
+        self.batch_size: int = self.options.batch_size
+        self.save_best: bool = self.options.save_best
         self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
         self.model_path: str = f"{'best' if self.save_best else 'latest'}.model.keras"
 
         # Data Offsets
-        self.phase_offset_scale: "Literal[0, -1] | float" = options.phase_offset_scale
-        self.amplitude_offset_scale: float = options.amplitude_offset_scale
-        self.mask_fraction: float = options.mask_fraction
+        self.phase_offset_scale: "Literal[0, -1] | float" = (
+            self.options.phase_offset_scale
+        )
+        self.amplitude_offset_scale: float = self.options.amplitude_offset_scale
+        self.mask_fraction: float = self.options.mask_fraction
 
         # Training functions
         self._scheduler: type[ks.optimizers.schedules.LearningRateSchedule] = (
-            options.scheduler_cls
+            self.options.scheduler_cls
         )
-        self._optimiser: type[ks.optimizers.Optimizer] = options.optimiser_cls
-        self._loss: ks.losses.Loss = options.loss_cls()
+        self._optimiser: type[ks.optimizers.Optimizer] = self.options.optimiser_cls
 
         self.stage: PAEStage
         self.latents_z_mask: "ITensor[S['n_pae_latents']]"
         self.latents_physical_mask: "ITensor[S['n_pae_latents']]"
 
         # --- Loss ---
+        self._loss: ks.losses.Loss
         self._loss_terms: dict[str, "FTensor[S['']]"]
-        self.loss_residual_penalty: float = options.loss_residual_penalty
+        self.loss_residual_penalty: float = self.options.loss_residual_penalty
 
-        self.loss_delta_av_penalty: float = options.loss_delta_av_penalty
-        self.loss_delta_m_penalty: float = options.loss_delta_m_penalty
-        self.loss_delta_p_penalty: float = options.loss_delta_p_penalty
+        self.loss_delta_av_penalty: float = self.options.loss_delta_av_penalty
+        self.loss_delta_m_penalty: float = self.options.loss_delta_m_penalty
+        self.loss_delta_p_penalty: float = self.options.loss_delta_p_penalty
         self.loss_physical_penalty: float = sum((
             self.loss_delta_av_penalty,
             self.loss_delta_m_penalty,
             self.loss_delta_p_penalty,
         ))  # Only calculate physical latent penalties if at least one penalty scaling is > 0
 
-        self.loss_covariance_penalty: float = options.loss_covariance_penalty
-        self.loss_decorrelate_all: bool = options.loss_decorrelate_all
-        self.loss_decorrelate_dust: bool = options.loss_decorrelate_dust
+        self.loss_covariance_penalty: float = self.options.loss_covariance_penalty
+        self.loss_decorrelate_all: bool = self.options.loss_decorrelate_all
+        self.loss_decorrelate_dust: bool = self.options.loss_decorrelate_dust
+
+        self.loss_clip_delta: float = self.options.loss_clip_delta
 
         # --- Metrics ---
         self.loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss")
@@ -693,17 +695,18 @@ class TFPAEModel(ks.Model):
         x: "TensorCompatible | None" = None,
         y: "TensorCompatible | None" = None,
         y_pred: "TensorCompatible | None" = None,
-        sample_weight: "Any | None" = None,
+        sample_weight: "TensorCompatible | None" = None,
         training: bool | None = None,
         mask: "TensorCompatible | None" = None,
     ) -> "FTensor[S['']] | None":
-        if x is None or y is None or y_pred is None:
+        if x is None or y is None or y_pred is None or sample_weight is None:
             return None
         training = False if training is None else training
 
         latents = tf.convert_to_tensor(x)
         input_amp = tf.convert_to_tensor(y)
         output_amp = tf.convert_to_tensor(y_pred)
+        input_d_amp = tf.convert_to_tensor(sample_weight)
         input_mask = tf.cast(
             (mask if mask is not None else tf.ones_like(input_amp, dtype=tf.int32)),
             tf.float32,
@@ -719,7 +722,18 @@ class TFPAEModel(ks.Model):
             input_mask = cast("ITensor[S['batch_dim nspec_dim wl_dim']]", input_mask)
             latents_mask = cast("FTensor[S['batch_dim 1']]", latents_mask)
 
-        pred_loss = self._loss(y_true=input_amp, y_pred=output_amp)
+        loss = self.options.loss_cls()
+        loss.latents = latents
+        loss.input_amp = input_amp
+        loss.input_d_amp = input_d_amp
+        loss.output_amp = output_amp
+        loss.input_mask = input_mask
+        loss.latents_mask = latents_mask
+        loss.model = self
+        self._loss = loss
+
+        pred_loss = loss(y_true=input_amp, y_pred=output_amp)
+
         model_loss = tf.reduce_sum(self.losses)
         if TYPE_CHECKING:
             pred_loss = cast("FTensor[S['']]", pred_loss)
@@ -753,7 +767,7 @@ class TFPAEModel(ks.Model):
             preferred_latent_values = tf.concat(
                 (
                     tf.constant((1.0,)),  # ΔAᵥ = 1
-                    tf.zeros(self.n_zs),
+                    tf.zeros(self.n_zs),  # zs = 0
                     tf.constant((0.0,)),  # Δℳ  = 0
                     tf.constant((0.0,)),  # Δ𝓅 = 0
                 ),
@@ -831,11 +845,11 @@ class TFPAEModel(ks.Model):
             loss_covariance_penalty = self.loss_covariance_penalty * loss_cov
             loss_terms[self.cov_loss_tracker.name] = loss_covariance_penalty
 
-        loss = tf.add_n(loss_terms.values())
-        loss_terms[self.loss_tracker.name] = loss
+        total_loss = tf.add_n(loss_terms.values())
+        loss_terms[self.loss_tracker.name] = total_loss
 
         self._loss_terms = loss_terms
-        return loss
+        return total_loss
 
     @override
     def train_step(
@@ -850,7 +864,7 @@ class TFPAEModel(ks.Model):
         self._epoch += 1
 
         # --- Setup Data ---
-        (phase, _d_phase, amplitude, _d_amplitude, mask) = self.prep_data_per_epoch(
+        (phase, amplitude, d_amplitude, mask) = self.prep_data_per_epoch(
             cast("EpochInputs", data)
         )
 
@@ -869,6 +883,7 @@ class TFPAEModel(ks.Model):
                 x=latents,
                 y=amplitude,
                 y_pred=pred_amplitude,
+                sample_weight=d_amplitude,
                 training=training,
                 mask=mask,
             )
@@ -971,10 +986,9 @@ class TFPAEModel(ks.Model):
                 learning_rate=schedule,
                 weight_decay=self.stage.learning_rate_weight_decay_rate,
             )
-            loss = self._loss
             self.compile(
                 optimizer=optimiser,
-                loss=loss,
+                loss=self.options.loss_cls(),
                 run_eagerly=self.stage.debug,
             )
             self(
@@ -1167,8 +1181,7 @@ class TFPAEModel(ks.Model):
         # For each SN, get the index of each spectra we want to shuffle.
         #   Since different SNe will have a different number of spectra to shuffle, this is a ragged tensor
         spec_inds_to_shuffle_per_sn = tf.RaggedTensor.from_value_rowids(
-            spec_inds_to_shuffle,
-            sn_inds,
+            spec_inds_to_shuffle, sn_inds, nrows=n_sn
         )
         if TYPE_CHECKING:
             spec_inds_to_shuffle_per_sn = cast(
@@ -1319,13 +1332,13 @@ class TFPAEModel(ks.Model):
                 )
             mask *= shuffled_amp_mask
 
-        return (phase, d_phase, amplitude, d_amplitude, mask)
+        return (phase, amplitude, d_amplitude, mask)
 
     def recon_error(
         self,
         data: "ModelInputs",
     ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        (phase, _d_phase, amp_true, d_amp, mask) = data
+        (phase, amp_true, d_amp, mask) = data
         _, amp_pred = self((phase, amp_true), training=False, mask=mask)
         wl_dim = tf.shape(mask)[-1]
 

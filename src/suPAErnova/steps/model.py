@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.configs.steps.model import AbstractModelStepConfig
+    from suPAErnova.configs.steps.steps import AbstractStepResult
     from suPAErnova.configs.steps.backends import AbstractModelConfig
 
     from .backends import AbstractModel
@@ -29,7 +30,7 @@ class AbstractModelStep[Backend: str, Model: AbstractModel[Backend]](SNPAEStep):
 
         self.models: list[Model]
         self.n_models: int
-        self.results: list[ModelResult]
+        self.results: list[AbstractStepResult]
 
     @override
     def _setup(self, *args: "Any", **kwargs: "Any") -> None:

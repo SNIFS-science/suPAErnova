@@ -1,167 +1,168 @@
-import os
 from typing import TYPE_CHECKING
-import argparse
 
+import yaml
 import numpy as np
 import pytest
 import tensorflow as tf
-from supaernova_legacy.utils import data_loader
-from supaernova_legacy.models import (
-    loader as model_loader,
-    losses,
-    autoencoder,
-    autoencoder_training,
-)
-from supaernova_legacy.utils.YParams import YParams
 
 from suPAErnova.configs.steps.pae import PAEStepResult
+from suPAErnova.configs.steps.data import DataStepResult
 
 if TYPE_CHECKING:
     from typing import Any
     from pathlib import Path
     from collections.abc import Callable
 
+    from _pytest.tmpdir import TempPathFactory
+
 
 def legacy_pae_step(
-    data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
-) -> dict[str, "Any"]:
-    # Except where indicated, this is taken verbatim from the `train_ae` script
-    # Comments have been removed
-    # Print statements have been removed
-    # Plotting has been removed
-    # Unused variables have been removed
+    pae_params: dict[str, "Any"],
+    data: "DataStepResult",
+) -> list[dict[str, "Any"]]:
+    # Import here to avoid dependency conflicts
+    from supaernova_legacy.models.losses import compute_loss_ae
+    from supaernova_legacy.scripts.train_ae import train_ae
 
-    # Set model Architecture and training params and train
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--yaml_config", default="../config/train.yaml", type=str)
-    parser.add_argument("--config", default="pae", type=str)
+    # Except where indicated, this is running the `train_ae` script verbatim
 
-    args = parser.parse_args()
+    # Variation: train_ae script modified to allow passing args as a list of strings
+    # Variation: train_ae script modified to return a dictionary of results per train stage
+    # Variation: train_ae script modified to skip training stages which have already been run
+    # Variation: Legacy code relied on the now deprecated tensorflow_addons package.
+    #            Most of the functionality now resides in tensorflow.keras
+    #            The Legacy code has been updated to reflect this
+    #            The biggest change is to the AdamW optimiser, which can no longer take a function for its weight_decay argument
+    # Variation: Legacy code used an old version of Tensorflow, and the syntax has since changed
+    #            In particular:
+    #             - `tf.tf_fn(x)` is no longer valid, so has been updated to `ks.layers.Lambda(tf.tf_fn)(x)`
+    #             - Stricter dtype checks (int32 ~= int64 ~= float32 ~= float64). Using tf.cast where needed.
 
-    params = YParams(os.path.abspath(args.yaml_config), args.config, print_params=True)
-    epochs_initial = params["epochs"]
-
-    train_data = data_loader.load_data(
-        os.path.join(
-            params["PROJECT_DIR"],
-            params["train_data_file"],
-        ),
-        set_data_min_val=params["set_data_min_val"],
+    data_out_path: Path = (
+        pae_params["cache_path"] / pae_params["fname"] / "data" / "legacy"
     )
-
-    test_data = data_loader.load_data(
-        os.path.join(
-            params["PROJECT_DIR"],
-            params["test_data_file"],
-        ),
-        set_data_min_val=params["set_data_min_val"],
+    pae_out_path: Path = (
+        pae_params["cache_path"] / pae_params["fname"] / "pae" / "legacy"
     )
+    model_dir = pae_out_path / "tensorflow_models"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    param_dir = pae_out_path / "params"
+    param_dir.mkdir(parents=True, exist_ok=True)
 
-    # Mask certain supernovae
-    train_data["mask_sn"] = data_loader.get_train_mask(train_data, params)
-    test_data["mask_sn"] = data_loader.get_train_mask(test_data, params)
+    yaml_config = pae_params["tmp_path"] / "train.yaml"
 
-    # Mask certain spectra
-    train_data["mask_spectra"] = data_loader.get_train_mask_spectra(train_data, params)
-    test_data["mask_spectra"] = data_loader.get_train_mask_spectra(test_data, params)
+    config = {
+        "pae": {
+            "PROJECT_DIR": str(pae_params["root_path"]),
+            "MODEL_DIR": str(model_dir),
+            "PARAM_DIR": str(param_dir),
+            "train_data_file": str(data_out_path / "train" / "kfold0.npz"),
+            "test_data_file": str(data_out_path / "test" / "kfold0.npz"),
+            "verbose": True,
+            "overfit": not pae_params["save_best"],
+            "epochs": pae_params["delta_av_epochs"],
+            "epochs_latent": pae_params["zs_epochs"],
+            "epochs_final": pae_params["final_epochs"],
+            "lr": pae_params["delta_av_lr"],
+            "lr_decay_steps": pae_params["delta_av_lr_decay_steps"],
+            "lr_decay_rate": pae_params["delta_av_lr_decay_rate"],
+            "lr_deltat": pae_params["delta_p_lr"],
+            "weight_decay_rate": pae_params["delta_av_lr_weight_decay_rate"],
+            "min_train_redshift": pae_params["min_train_redshift"],
+            "max_train_redshift": pae_params["max_train_redshift"],
+            "max_light_cut": (
+                pae_params["min_train_phase"],
+                pae_params["max_train_phase"],
+            ),
+            "max_light_cut_spectra": (
+                pae_params["min_train_phase"],
+                pae_params["max_train_phase"],
+            ),
+            "latent_dims": (pae_params["n_z_latents"],),
+            "seed": pae_params["seed"],
+            "layer_type": pae_params["architecture"],
+            "physical_latent": pae_params["physical_latents"],
+            "val_every": pae_params["val_every"],
+            "activation": pae_params["activation"].upper(),
+            "loss_fn": pae_params["loss"].upper(),
+            "optimizer": pae_params["optimiser"].upper(),
+            "scheduler": pae_params["scheduler"].upper().replace("DECAY", ""),
+            "kernel_regularizer": pae_params["kernel_regulariser"] is not None,
+            "colorlaw_file": str(pae_params["colourlaw"]),
+            "colorlaw_preset": pae_params["colourlaw"] is not None,
+            "kfold": 0,
+            "out_file_tail": "",
+            "savemodel": True,
+            "model_summary": False,
+            "inverse_spectra_cut": False,
+            "twins_cut": False,
+            "use_val": pae_params["validation_frac"] > 0,
+            "cond_dim": 1,
+            "data_dim": 288,  # Only correct for the SNFactory data
+            "n_timestep": 32,  # Only correct for the SNFactory data
+            "encode_dims": (*pae_params["encode_dims"], 32),
+            "decode_dims": (32, *reversed(pae_params["encode_dims"])),
+            "batch_size": pae_params["batch_size"],
+            "dropout": pae_params["dropout"] > 0,
+            "batchnorm": pae_params["batch_normalisation"],
+            "set_data_min_val": 0,
+            "train_noise": pae_params["amplitude_offset_scale"] > 0,
+            "noise_scale": pae_params["amplitude_offset_scale"],
+            "train_time_uncertainty": pae_params["phase_offset_scale"] != 0,
+            "vary_mask": pae_params["mask_fraction"] > 0,
+            "mask_vary_frac": pae_params["mask_fraction"],
+            "clip_delta": pae_params["loss_clip_delta"],
+            "iloss_amplitude_offset": pae_params["loss_residual_penalty"] > 0,
+            "lambda_amplitude_offset": pae_params["loss_residual_penalty"],
+            "use_amplitude": pae_params["use_amplitude"],
+            "iloss_amplitude_parameter": pae_params["loss_delta_m_penalty"] > 0,
+            "lambda_amplitude_parameter": pae_params["loss_delta_m_penalty"],
+            "iloss_covariance": pae_params["loss_covariance_penalty"] > 0,
+            "lambda_covariance": pae_params["loss_covariance_penalty"],
+            "decorrelate_dust": pae_params["loss_decorrelate_dust"],
+            "decorrelate_all": pae_params["loss_decorrelate_all"],
+            "train_latent_individual": pae_params["seperate_z_latent_training"],
+        }
+    }
+    with yaml_config.open("w") as io:
+        yaml.safe_dump(config, io)
 
-    # Split off validation set from training set
-    if params["use_val"]:
-        train_data, val_data = data_loader.split_train_and_val(train_data, params)
-    else:
-        val_data = test_data
+    args = [f"--yaml_config={yaml_config}", "--config=pae"]
+    results = train_ae(args)
+    pae_step_results = []
+    for stage, (model, _params) in results.items():
+        pae_step = {}
+        pae_step["stage"] = stage
+        pae_step["ind"] = data.ind
+        pae_step["sn_name"] = data.sn_name
+        pae_step["spectra_id"] = data.spectra_id
 
-    for il, latent_dim in enumerate(params["latent_dims"]):
-        params["latent_dim"] = latent_dim
-        params["num_training_stages"] = latent_dim + 3
-        params["train_stage"] = 0
+        x = data.amplitude
+        cond = data.phase
+        sigma = data.sigma
+        mask = data.mask
 
-        if latent_dim == 0:
-            # Model parameters are (\Delta t, \Delta m, \Delta A_v)
-            # train \Delta m and \Delta A_v first. Then \Delta t
-            params["train_stage"] = 1
-            params["num_training_stages"] = 2
+        x = tf.cast(x, tf.float32)
+        cond = tf.cast(cond, tf.float32)
+        mask = tf.cast(mask, tf.float32)
 
-        tf.random.set_seed(params["seed"])
+        z = model.encode(x, cond, mask)
+        x_pred = model.decode(z, cond, mask)
+        pae_step["latents"] = z.numpy()
+        pae_step["output_amp"] = x_pred.numpy()
 
-        # Create model
-        AEmodel = autoencoder.AutoEncoder(params, training=True)
-
-        # Model Summary
-        if params["model_summary"] and (il == 0):
-            print("Encoder Summary")
-            AEmodel.encoder.summary()
-
-            print("Decoder Summary")
-            AEmodel.decoder.summary()
-
-        print(f"Training model with {latent_dim:d} latent dimensions")
-        print("Running training stage ", params["train_stage"])
-        # Train model, splitting into seperate training stages for seperate model parameters, if desired.
-        _training_loss, _val_loss, _test_loss = autoencoder_training.train_model(
-            train_data,
-            val_data,
-            test_data,
-            AEmodel,
+        loss, (pred_loss, resid_loss, delta_loss, cov_loss, model_loss) = (
+            compute_loss_ae(model, x, cond, sigma, mask)
         )
+        pae_step["loss"] = loss
+        pae_step["pred_loss"] = pred_loss
+        pae_step["resid_loss"] = resid_loss
+        pae_step["delta_loss"] = delta_loss
+        pae_step["cov_loss"] = cov_loss
+        pae_step["model_loss"] = model_loss
 
-        params["train_stage"] += 1
-        if not params["train_latent_individual"]:
-            params["train_stage"] += params["latent_dim"] - 1
-
-        while params["train_stage"] < params["num_training_stages"]:
-            print("Running training stage ", params["train_stage"])
-
-            epochs_initial = params["epochs"]
-
-            AEmodel_second = autoencoder.AutoEncoder(params, training=True)
-            if params["train_stage"] < params["num_training_stages"] - 2:
-                AEmodel_second.params["epochs"] = params["epochs_latent"]
-            if (
-                params["train_stage"] >= params["num_training_stages"] - 2
-            ):  # add in delta mag
-                AEmodel_second.params["epochs"] = params["epochs_final"]
-
-            # Load best checkpoint from step 0 training
-            encoder, decoder, _AE_params = model_loader.load_ae_models(params)
-
-            final_dense_layer = len(params["encode_dims"]) + 4
-
-            final_layer_weights = encoder.layers[final_dense_layer].get_weights()[0]
-            final_layer_weights_init = AEmodel_second.encoder.layers[
-                final_dense_layer
-            ].get_weights()[0]
-
-            if params["train_stage"] <= params["latent_dim"]:  # add in z_1, ..., z_n
-                idim = 2 + params["train_stage"]
-                final_layer_weights[:, idim] = final_layer_weights_init[:, idim] / 100
-
-            if (
-                params["train_stage"] == params["num_training_stages"] - 2
-            ):  # add in delta mag
-                final_layer_weights[:, 1] = final_layer_weights_init[:, 1] / 100
-                if not params["train_latent_individual"]:
-                    final_layer_weights[:, 3:] = final_layer_weights_init[:, 3:] / 100
-
-            if (
-                params["train_stage"] == params["num_training_stages"] - 1
-            ):  # add in delta t
-                final_layer_weights[:, 0] = final_layer_weights_init[:, 0] / 100
-
-            encoder.layers[final_dense_layer].set_weights([final_layer_weights])
-
-            AEmodel_second.encoder.set_weights(encoder.get_weights())
-            AEmodel_second.decoder.set_weights(decoder.get_weights())
-
-            _training_loss, _val_loss, _test_loss = autoencoder_training.train_model(
-                train_data,
-                val_data,
-                test_data,
-                AEmodel_second,
-            )
-
-            params["train_stage"] += 1
-    return {}
+        pae_step_results.append(pae_step)
+    return pae_step_results
 
 
 @pytest.fixture(scope="session")
@@ -169,31 +170,33 @@ def legacy_pae_step_factory(
     data_path: "Path",
     root_path: "Path",
     cache_path: "Path",
-) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]":
+    tmp_path_factory: "TempPathFactory",
+    legacy_data_step_factory: "Callable[[dict[str, Any]], dict[str, Any]]",
+) -> "Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]]":
     def _legacy_pae_step(
-        data_params: dict[str, "Any"], pae_params: "dict[str, Any]"
-    ) -> "dict[str, Any]":
-        data_params["data_path"] = data_path
-        data_params["root_path"] = root_path
-        data_params["cache_path"] = cache_path
-
+        data_params: "dict[str, Any]", pae_params: "dict[str, Any]"
+    ) -> "list[dict[str, Any]]":
         pae_params["data_path"] = data_path
         pae_params["root_path"] = root_path
         pae_params["cache_path"] = cache_path
-        return legacy_pae_step(data_params, pae_params)
+        pae_params["tmp_path"] = tmp_path_factory.mktemp("config")
+
+        data = DataStepResult.model_validate(legacy_data_step_factory(data_params))
+        return legacy_pae_step(pae_params, data)
 
     return _legacy_pae_step
 
 
 @pytest.fixture(scope="session")
 def legacy_pae_result_factory(
-    legacy_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], PAEStepResult]":
+    legacy_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]]",
+) -> "Callable[[dict[str, Any], dict[str, Any]], list[PAEStepResult]]":
     def _legacy_pae_result(
         data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
-    ) -> "PAEStepResult":
-        return PAEStepResult.model_validate(
-            legacy_pae_step_factory(data_params, pae_params)
-        )
+    ) -> "list[PAEStepResult]":
+        return [
+            PAEStepResult.model_validate(pae_step)
+            for pae_step in legacy_pae_step_factory(data_params, pae_params)
+        ]
 
     return _legacy_pae_result

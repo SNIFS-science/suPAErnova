@@ -7,6 +7,8 @@ from inspect import signature
 from pathlib import Path
 from collections.abc import Callable
 
+from pydantic import BaseModel, ConfigDict
+
 from suPAErnova.configs import SNPAEConfig
 from suPAErnova.configs.paths import PathConfig
 
@@ -111,3 +113,7 @@ class StepConfig(SNPAEConfig):
             mkdir=True,
         )
         return super().from_config(step_config)
+
+
+class AbstractStepResult(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(arbitrary_types_allowed=True)

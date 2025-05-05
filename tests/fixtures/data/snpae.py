@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import suPAErnova
+from suPAErnova.configs.steps.data import DataStepConfig
 
 if TYPE_CHECKING:
     from typing import Any
@@ -22,14 +23,15 @@ def snpae_data_step_factory(
     def _snpae_data_step(data_params: "dict[str, Any]") -> "DataStep":
         config: "dict[str, Any]" = {
             "data": {
+                **{
+                    key: val
+                    for key, val in data_params.items()
+                    if key in DataStepConfig.model_fields
+                },
                 "data_dir": data_path,
                 "meta": "meta.csv",
                 "idr": "IDR_eTmax.txt",
                 "mask": "mask_info_wmin_wmax.txt",
-                "min_phase": data_params["min_phase"],
-                "max_phase": data_params["max_phase"],
-                "train_frac": data_params["train_frac"],
-                "seed": data_params["seed"],
             }
         }
         snpae = suPAErnova.prepare_config(

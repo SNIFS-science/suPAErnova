@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.configs.steps.data import DataStepResult
+    from suPAErnova.configs.steps.steps import AbstractStepResult
     from suPAErnova.configs.steps.pae.model import PAEModelConfig
 
     from .tf import TFPAEModel
@@ -87,6 +88,8 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.stage_delta_p: PAEStage
         self.stage_final: PAEStage
         self.run_stages: list[PAEStage]
+
+        self.results: list[PAEStepResult]
 
     @override
     def _setup(
@@ -171,6 +174,8 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             })
             for i in range(self.n_zs)
         ]
+        if not self.seperate_z_latent_training:
+            self.stage_zs = [self.stage_zs[-1]]
 
         self.stage_delta_m = PAEStage.model_validate({
             "stage": z0 + self.n_zs,
@@ -214,17 +219,22 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 *self.stage_zs,
                 self.stage_delta_m,
                 self.stage_delta_p,
-                self.stage_final,
             ]
         else:
-            self.run_stages = [*self.stage_zs, self.stage_final]
+            self.run_stages = self.stage_zs
+
+        if not self.seperate_latent_training:
+            self.run_stages = [self.stage_final]
 
     @override
     def _completed(self) -> bool:
         self._model()
         final_stage = self.run_stages[-1]
         final_savepath = (
-            self.paths.out / self.model.name / final_stage.fname / self.model.model_path
+            self.paths.out
+            / self.model.name
+            / f"{final_stage.stage}_{final_stage.fname}"
+            / self.model.model_path
         )
 
         if not final_savepath.exists():
@@ -240,10 +250,16 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
-        final_savepath = self.paths.out / self.model.name / final_stage.fname
+        final_savepath = (
+            self.paths.out
+            / self.model.name
+            / f"{final_stage.stage}_{final_stage.fname}"
+        )
 
         self.log.debug(f"Loading final PAE model weights from {final_savepath}")
         self.model.load_checkpoint(final_savepath, reset_weights=False)
+
+        self._result()
 
     @override
     def _run(self) -> None:
@@ -253,7 +269,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             self.log.debug(f"Starting PAEStage {i}: {stage.name}")
             if savepath is not None:
                 stage.loadpath = savepath
-            savepath = self.paths.out / self.model.name / stage.fname
+            savepath = self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
             stage.savepath = savepath
 
             model_path = savepath / self.model.model_path
@@ -272,14 +288,38 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self._model()
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
-        final_savepath = self.paths.out / self.model.name / final_stage.fname
+        final_savepath = (
+            self.paths.out
+            / self.model.name
+            / f"{final_stage.stage}_{final_stage.fname}"
+        )
 
         self.log.debug(f"Saving final PAE model weights to {final_savepath}")
         self.model.save_checkpoint(final_savepath)
 
-        self.log.debug("Calculating pae results")
-        results = {"name": self.model.name}
-        self.results = PAEStepResult.model_validate(results)
+        self.log.debug("Calculating PAE results")
+        model_results: list[PAEStepResult] = []
+        for stage in self.run_stages:
+            results = {
+                "stage": stage.stage,
+                "ind": None,
+                "sn_name": None,
+                "spectra_id": None,
+                "latents": None,
+                "input_amp": None,
+                "input_d_amp": None,
+                "input_mask": None,
+                "latents_mask": None,
+                "output_amp": None,
+                "pred_loss": None,
+                "model_loss": None,
+                "resid_loss": None,
+                "delta_loss": None,
+                "cov_loss": None,
+            }
+            stage_results = PAEStepResult.model_validate(results)
+            model_results.append(stage_results)
+        self.results = model_results
 
     @override
     def _analyse(self) -> None:

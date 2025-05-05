@@ -81,79 +81,81 @@ class PAEModelConfig(AbstractModelConfig):
     seperate_z_latent_training: bool
 
     # === Optional ===
-    seed: int = 12345
-    batch_size: PositiveInt = 32
+    seed: int
+    batch_size: PositiveInt
 
-    save_best: bool = False
+    save_best: bool
 
     # --- Data ---
-    min_train_redshift: float = -float("inf")
-    max_train_redshift: float = +float("inf")
-    min_test_redshift: float = -float("inf")
-    max_test_redshift: float = +float("inf")
-    min_val_redshift: float = -float("inf")
-    max_val_redshift: float = +float("inf")
+    min_train_redshift: float
+    max_train_redshift: float
+    min_test_redshift: float
+    max_test_redshift: float
+    min_val_redshift: float
+    max_val_redshift: float
 
-    min_train_phase: float = -float("inf")
-    max_train_phase: float = +float("inf")
-    min_test_phase: float = -float("inf")
-    max_test_phase: float = +float("inf")
-    min_val_phase: float = -float("inf")
-    max_val_phase: float = +float("inf")
+    min_train_phase: float
+    max_train_phase: float
+    min_test_phase: float
+    max_test_phase: float
+    min_val_phase: float
+    max_val_phase: float
 
     # --- Data Offsets ---
-    phase_offset_scale: float = 0
-    amplitude_offset_scale: NonNegativeFloat = 0
-    mask_fraction: Annotated[float, Field(ge=0, le=1)] = 0
+    phase_offset_scale: float
+    amplitude_offset_scale: NonNegativeFloat
+    mask_fraction: Annotated[float, Field(ge=0, le=1)]
 
     # --- Loss ---
-    loss_residual_penalty: NonNegativeFloat = 0
+    loss_residual_penalty: NonNegativeFloat
 
-    loss_delta_av_penalty: NonNegativeFloat = 0
-    loss_delta_m_penalty: NonNegativeFloat = 0
-    loss_delta_p_penalty: NonNegativeFloat = 0
+    loss_delta_av_penalty: NonNegativeFloat
+    loss_delta_m_penalty: NonNegativeFloat
+    loss_delta_p_penalty: NonNegativeFloat
 
-    loss_covariance_penalty: NonNegativeFloat = 0
-    loss_decorrelate_all: bool = False
-    loss_decorrelate_dust: bool = False
+    loss_covariance_penalty: NonNegativeFloat
+    loss_decorrelate_all: bool
+    loss_decorrelate_dust: bool
+
+    loss_clip_delta: PositiveFloat
 
     # --- Stages ---
     # ΔAᵥ
-    delta_av_epochs: PositiveInt = 1000
-    delta_av_lr: PositiveFloat = 0.005
-    delta_av_lr_decay_steps: PositiveInt = 300
-    delta_av_lr_decay_rate: PositiveFloat = 0.95
-    delta_av_lr_weight_decay_rate: PositiveFloat = 0.00001
+    delta_av_epochs: PositiveInt
+    delta_av_lr: PositiveFloat
+    delta_av_lr_decay_steps: PositiveInt
+    delta_av_lr_decay_rate: PositiveFloat
+    delta_av_lr_weight_decay_rate: PositiveFloat
 
     # Zs
-    zs_epochs: PositiveInt = 1000
-    zs_lr: PositiveFloat = 0.005
-    zs_lr_decay_steps: PositiveInt = 300
-    zs_lr_decay_rate: PositiveFloat = 0.95
-    zs_lr_weight_decay_rate: PositiveFloat = 0.00001
+    zs_epochs: PositiveInt
+    zs_lr: PositiveFloat
+    zs_lr_decay_steps: PositiveInt
+    zs_lr_decay_rate: PositiveFloat
+    zs_lr_weight_decay_rate: PositiveFloat
 
     # Δℳ
-    delta_m_epochs: PositiveInt = 1000
-    delta_m_lr: PositiveFloat = 0.005
-    delta_m_lr_decay_steps: PositiveInt = 300
-    delta_m_lr_decay_rate: PositiveFloat = 0.95
-    delta_m_lr_weight_decay_rate: PositiveFloat = 0.00001
+    delta_m_epochs: PositiveInt
+    delta_m_lr: PositiveFloat
+    delta_m_lr_decay_steps: PositiveInt
+    delta_m_lr_decay_rate: PositiveFloat
+    delta_m_lr_weight_decay_rate: PositiveFloat
 
     # Δ𝓅
-    delta_p_epochs: PositiveInt = 1000
-    delta_p_lr: PositiveFloat = 0.005
-    delta_p_lr_decay_steps: PositiveInt = 300
-    delta_p_lr_decay_rate: PositiveFloat = 0.95
-    delta_p_lr_weight_decay_rate: PositiveFloat = 0.00001
+    delta_p_epochs: PositiveInt
+    delta_p_lr: PositiveFloat
+    delta_p_lr_decay_steps: PositiveInt
+    delta_p_lr_decay_rate: PositiveFloat
+    delta_p_lr_weight_decay_rate: PositiveFloat
 
     # Final
-    final_epochs: PositiveFloat = 5000
-    final_lr: PositiveFloat = 0.001
-    final_lr_decay_steps: PositiveInt = 300
-    final_lr_decay_rate: PositiveFloat = 0.95
-    final_lr_weight_decay_rate: PositiveFloat = 0.00001
+    final_epochs: PositiveFloat
+    final_lr: PositiveFloat
+    final_lr_decay_steps: PositiveInt
+    final_lr_decay_rate: PositiveFloat
+    final_lr_weight_decay_rate: PositiveFloat
 
-    colourlaw: Path | None = None
+    colourlaw: Path | None
 
     @model_validator(mode="after")
     def validate_paths(self) -> Self:

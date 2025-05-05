@@ -7,8 +7,13 @@ from collections.abc import Callable
 from suPAErnova.steps.nflow import NFlowStep
 from suPAErnova.configs.steps.model import AbstractModelStepConfig
 from suPAErnova.configs.steps.nflow import NFlowStepConfig
+from suPAErnova.configs.steps.steps import AbstractStepResult
 
 from .model import PosteriorModelConfig
+
+
+class PosteriorStepResult(AbstractStepResult):
+    name: str
 
 
 class PosteriorStepConfig[Backend: str](

@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
+    from suPAErnova.configs.steps.steps import AbstractStepResult
     from suPAErnova.configs.steps.backends import AbstractModelConfig
 
 
@@ -28,7 +29,7 @@ class AbstractModel[Backend: str](SNPAEStep):
         super().__init__(config)
 
         self.model: Any
-        self.results: ModelResult
+        self.results: AbstractStepResult
         self.model_cls: type[Any]
         for backend_name in BACKENDS:
             if self.options.backend in get_args(BACKENDS[backend_name]):

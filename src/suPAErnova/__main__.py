@@ -5,8 +5,8 @@ from pathlib import Path
 import toml
 import click
 
-from suPAErnova import main
-from suPAErnova.configs.paths import PathConfig
+from .suPAErnova import main
+from .configs.paths import PathConfig
 
 if TYPE_CHECKING:
     from pydantic import JsonValue

@@ -13,19 +13,15 @@ from numpy import typing as npt
 from astropy import cosmology as cosmo
 from pydantic import (
     Field,
-    BaseModel,
-    ConfigDict,
     PositiveInt,
     field_validator,
     model_validator,
 )
 
-from .steps import StepConfig
+from .steps import StepConfig, AbstractStepResult
 
 
-class DataStepResult(BaseModel):
-    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True)  # pyright: ignore[reportIncompatibleVariableOverride]
-
+class DataStepResult(AbstractStepResult):
     ind: "npt.NDArray[np.int32]"
     nspectra: "npt.NDArray[np.int32]"
     sn_name: "npt.NDArray[np.str_]"
@@ -60,12 +56,12 @@ class DataStepConfig(StepConfig):
     mask: Path
 
     # --- Optional ---
-    cosmological_model: str = "WMAP7"
-    salt_model: str | Path = "salt2"
-    min_phase: float = -10
-    max_phase: float = 40
-    train_frac: Annotated[float, Field(ge=0, le=1)] = 0.75
-    seed: PositiveInt = 12345
+    cosmological_model: str
+    salt_model: str | Path
+    min_phase: float
+    max_phase: float
+    train_frac: Annotated[float, Field(ge=0, le=1)]
+    seed: PositiveInt
 
     @model_validator(mode="after")
     def validate_paths(self) -> Self:
